@@ -1,0 +1,62 @@
+# ===== 敏感配置(绝对不能上传)=====
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+credentials/
+
+# ===== Chrome profile(含 Google 登录)=====
+chrome-profile*/
+.polymarket-bot-chrome-profile*/
+*chrome-profile*/
+
+# ===== 交易数据和日志 =====
+*.log
+logs/
+data/
+positions/
+trades/
+history/
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+
+# ===== 系统和编辑器 =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== 保险:屏蔽所有 .env 结尾的文件 =====
+*.env
+!.env.example
+
+# ===== 本地密钥备份 =====
+_local_secrets/
+
+# ===== 调试截图和临时文本 =====
+debug_*.png
+debug_*.txt
+*.png
+
+# ===== AI 研究报告(可能含钱包信息)=====
+reports/

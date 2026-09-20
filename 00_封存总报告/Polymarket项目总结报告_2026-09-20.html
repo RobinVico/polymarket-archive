@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Polymarket 交易机器人项目总结报告（封存版）</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+         color: #1a2233; line-height: 1.75; font-size: 13.5px; max-width: 860px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 26px; border-bottom: 3px solid #2b4a8b; padding-bottom: 10px; margin-bottom: 4px; }
+  h2 { font-size: 19px; color: #2b4a8b; border-left: 5px solid #2b4a8b; padding-left: 10px; margin-top: 34px; page-break-after: avoid; }
+  h3 { font-size: 15.5px; color: #37517e; margin-top: 22px; page-break-after: avoid; }
+  .sub { color: #667; font-size: 13px; margin-bottom: 24px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 12.5px; }
+  th { background: #eef2fa; color: #2b4a8b; }
+  th, td { border: 1px solid #c9d4e8; padding: 5px 8px; text-align: left; vertical-align: top; }
+  tr { page-break-inside: avoid; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .good { color: #0a7d40; font-weight: 600; }
+  .bad  { color: #c0392b; font-weight: 600; }
+  .box  { background: #f5f7fc; border: 1px solid #d5deee; border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+  .warn { background: #fdf3e7; border-color: #ecd3ad; }
+  .key  { background: #eef9f0; border-color: #bfe3c8; }
+  code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; font-size: 12px; font-family: Menlo, monospace; }
+  li { margin: 4px 0; }
+  .small { font-size: 12px; color: #556; }
+</style>
+</head>
+<body>
+
+<h1>Polymarket 交易机器人项目总结报告</h1>
+<div class="sub">封存版 · 项目周期 2026-04-08 → 2026-09-20（约 5 个半月，含史前 v1）· 封存日期 2026-09-20 · 报告与全部代码/数据一并归档于本文件夹</div>
+
+<h2>一、这个项目是什么（一句话版）</h2>
+<p>用 AI（先 Claude 人工贴、后智谱 GLM 全自动）在 Polymarket 预测市场上选品、下单、盯盘、止盈止损的交易机器人。项目从「人做决定、机器人只执行止盈止损」的半自动，一路演进到「扫描→AI 选品→自动下单→自动重评→自动出场」的全自动，最后同时跑三个真钱账户做三种策略的对照实验，于 2026-09-20 封存。</p>
+
+<div class="box">
+<b>四个阶段（含史前）+ 一条支线：</b><br>
+⓪ <b>史前 v1「polymarket-bot」</b>（2026-04-08 ~ 04-16）：用浏览器自动化驱动 Gemini Deep Research 选品的最早尝试，v2 只留下技术文档。<br>
+① <b>v3 半自动初版</b>（2026-04-27，1 天定稿后冻结）：人下单，bot 只管分层止盈/止损。<br>
+② <b>半自动主项目 v4 → v7.5.4</b>(2026-05-09 ~ 2026-07-24)：人贴 prompt 给 Claude 分析、人拍板，bot 执行；132 次实质提交，止损/止盈/重评体系在这里成型。<br>
+③ <b>全自动 AUTO v8.0 → v8.5.5</b>(2026-07-06 fork ~ 2026-09-01 停 API)：零人工全流水线，GLM 全面接管分析；后期扩成三账户对照实验。<br>
+➕ 支线：<b>天气 bot</b>（2026-07-12 起，独立钱包）——Polymarket 每日最高温市场的确定性套利（日落后温度只降不升，买 0.90~0.995 档位吃 1~5% 差价），与主线完全隔离。
+</div>
+
+<h2>二、最终战绩（封存日实测数字）</h2>
+<p>口径按项目铁律：<b>以资产真相为准</b>（现总资产 − 净投入），逐笔台账只作明细——归零卖不掉的废仓不进台账，只看台账会高估战绩。数字取自 2026-09-20 封存当天重跑的三账户只读报告。</p>
+<table>
+<tr><th>账户 / 策略</th><th class="num">净投入</th><th class="num">封存日资产</th><th class="num">盈亏</th><th>出场规则</th></tr>
+<tr><td><b>主账户 · 全自动主策略</b><br><span class="small">Kelly 仓位 + 三档止损 + 止盈 + GLM 重评</span></td><td class="num">$99.66</td><td class="num">$90.61</td><td class="num bad">−$9.05（−9.1%）</td><td>完整策略：移动/硬止损、翻倍止盈、盘中+每日重评</td></tr>
+<tr><td><b>Bench · 基准对照</b><br><span class="small">GLM 推荐照单全收</span></td><td class="num">$90.47</td><td class="num">$41.81</td><td class="num bad">−$48.66（−53.8%）</td><td>只有一条：亏 30% 即卖，其余持有到结算</td></tr>
+<tr><td><b>Shadow · 低价拿到底</b><br><span class="small">只买 ≤0.40 的低价推荐</span></td><td class="num">$50.00</td><td class="num">$22.16</td><td class="num bad">−$27.84（−55.7%）</td><td>−60% 止损 + $0.05 地板，不止盈拿到结算</td></tr>
+<tr><td><b>合计</b></td><td class="num">$240.13</td><td class="num">$154.58</td><td class="num bad">−$85.55（−35.6%）</td><td></td></tr>
+</table>
+
+<div class="box key">
+<b>整个实验最值钱的结论（三账户对照给出的）：</b><br>
+1️⃣ <b>出场规则就是全部。</b>同一批 GLM 推荐，配上完整止盈止损的主账户只亏 9.1%，裸拿的两个对照账户各亏 54~56%。赚（少亏）的钱来自止盈止损纪律，不是来自选品。<br>
+2️⃣ <b>GLM 的选品在低价区是灾难。</b>Bench 双台账（止损不污染准确率）实测：整体判对率 56.8%（83/146），但 &lt;20¢ 区间 1/14、20-40¢ 区间 10/31——低价长尾被严重高估，「≤$0.30 区间 12 投 0 中」是 7-8 月复盘的原话。40-80¢ 区间判对率约 70%，是唯一能看的区间。<br>
+3️⃣ <b>小仓位不经济。</b>$2~5 的仓位下，买单凑整、点差、卖不掉的废仓等磨损占比放大，策略再好也难覆盖。
+</div>
+
+<h2>三、各阶段分别干了什么</h2>
+
+<h3>阶段⓪ 史前 v1「polymarket-bot」（~/polymarket-bot，2026-04-08 ~ 04-16）</h3>
+<p>整个项目的起点：「Autonomous Polymarket Bot」，思路是用浏览器自动化去驱动 Gemini Deep Research（也试过 Claude 网页版）对候选市场做深度调研、输出结构化交易建议，主打错价的低概率事件。留下了完整代码、04-15 的全量备份、两个配套 Chrome profile 和满目录的 debug 截图（自动化网页 UI 的辛酸史）。这条「免 API 费、走网页版」的路线后来被放弃，转向 v3 的「人贴 prompt」半自动——但「AI 深度调研 + 结构化 JSON 建议」的核心形态从这里一直延续到最后。v2 没有独立目录存世，只留下一份《Polymarket_技术文档_v2.docx》（在档案 05 文件夹）。</p>
+
+<h3>阶段① v3 半自动初版（~/polymarket-semi-auto，2026-04-27，冻结）</h3>
+<p>设计哲学是「人机分工」：Scanner 机械筛选流动性/价格/深度出扫描报告 → 人拿报告去 Claude Research 做分析、人自己在网页下限价单（做 maker 省手续费）→ bot 每 3 分钟盯盘，执行 T1/T2/T3 分层止盈和 W1/W2/W3 反向止损 → 接近目标时黄色提醒人去重评。两次提交后即冻结，作为后续一切的原型。</p>
+
+<h3>阶段② 半自动主项目 v4 → v7.5.4（~/polymarket，2026-05-09 ~ 2026-07-24）</h3>
+<p>项目的主战场，跑真钱、132 次实质提交（外加 3200+ 次 cron 自动备份提交）。人负责把 DISCOVERY/REEVAL prompt 贴给 Claude、拍板买卖；bot 负责扫描、监控、自动止盈止损、记账、网页面板。核心资产在这里成型：</p>
+<ul>
+<li><b>决策引擎</b>：三档止损 tier（收敛/混合/事件型，LLM 入场分类）、不对称触发价（止盈用 best_bid 防虚高、止损用 cur 防瞬时假象）、移动止损、翻倍全卖等止盈梯队。</li>
+<li><b>重评体系</b>：盲评优先方法论、大跌前中枢反锚定、GLM 接管重评（glm-5.2 + search_pro + thinking max + 正则兜底）、API 紧急暂停开关。</li>
+<li><b>基础设施</b>：SQLite WAL、Dashboard（资产曲线/事件中心/往期仓位分析/手机只读版 /m）、鉴权与限流、测试仓 paper trading、DNS 污染防护、双仓脱敏发布、cron 自动备份。</li>
+</ul>
+<p>2026-07-24 老 bot 被用户拍板杀掉，该账户转为 AUTO 项目的 Bench 对照账户，此目录就此定格。</p>
+
+<h3>阶段③ 全自动 AUTO v8.0 → v8.5.5（~/polymarket-auto，2026-07-06 ~ 封存）</h3>
+<p>2026-07-06 从半自动 v7.4.3 fork 出的独立副本（独立账户/数据库/端口 5052/版本线），目标「全自动交易，零人工」。开发协议：一步一报、规则简单写死、新代码只放独立新文件保证与老项目同步零冲突。两天冲刺（07-06~07-08）打通全流水线：</p>
+<ul>
+<li><b>全自动流水线</b>：每天 09:00/21:00 定时扫描（27 个白名单 tag）→ GLM 流式选品（扫一个喂一个、4 路并发、多轮自主搜索 agent）→ 写死规则分流（0.40&lt;价&lt;0.85 真买，否则测试仓）→ 自动下单（Kelly 仓位 + 信心乘数 + 漂移复核）→ 盯盘 → 大跌触发 + 每日 15:00 全仓 GLM 重评 → 自动出场。</li>
+<li><b>新账户攻坚</b>：Polymarket 2026 新架构存款钱包必须 sig=3 + vendored client 1.0.2 + 整数股数凑单——折腾一下午的答案，真钱闭环全程磨损 3 分钱验证通过。</li>
+<li><b>安全闸门</b>：宇宙铁律（只交易白名单 tag 扫描报告里的市场，源于 07-08 体育误买事故）、防对锁、方向纠错反问闸、无档案仓不重评、16 项全代码审查修复。</li>
+<li><b>策略迭代</b>（7 月中下旬密集调参）：事件型 −50% 硬止损、收敛/混合砸穿直接平仓、exit 护栏删除、q 校准从 prompt 五折改 Python 八折、单仓硬顶 $15→$5、月回撤预算删除等（详见时间线）。</li>
+<li><b>三账户实验</b>（07-23~24 搭起）：Bench 基准（照单全收测 GLM 裸预测）+ Shadow 低价拿到底（−60% 止损来自 18 条低价仓回撤研究），各配独立监控页。</li>
+<li><b>收尾</b>：08-12~08-27 停机窗口里智谱偷偷改了 Web Search API（无视 count 恒返 50 条）→ 复跑后 context 翻倍、选品频繁撞 20 分钟熔断、账单翻倍 → 09-01 用户令停掉全部付费 API（v8.5.5），只留免费盯盘和止损守仓 → 09-20 封存。</li>
+</ul>
+
+<h2>四、完整迭代时间线</h2>
+<h3>阶段⓪ + ① + ②（史前与半自动，2026-04 ~ 2026-07）</h3>
+<table>
+<tr><th style="width:92px">日期</th><th style="width:88px">版本</th><th>内容</th></tr>
+<tr><td>2026-04-08~16</td><td>v1</td><td>史前「polymarket-bot」：浏览器自动化驱动 Gemini Deep Research 选品；04-15 留全量备份后路线放弃</td></tr>
+<tr><td>2026-04 中下旬</td><td>v2</td><td>过渡版，无独立目录存世，仅存《Polymarket_技术文档_v2.docx》（档案 05）</td></tr>
+<tr><td>2026-04-27</td><td>v3</td><td>半自动初版定稿并冻结：人下单 + Claude 分析 + bot 分层止盈止损（T1-T3/W1-W3）</td></tr>
+<tr><td>2026-05-09</td><td>v4.1</td><td>主项目基线首次提交；双语 README、cron 自动备份体系</td></tr>
+<tr><td>2026-05-10~11</td><td>v4.x</td><td>Dashboard 成型：资产曲线（Chart.js 多区间）、盈亏列、metric 卡片、confidence 持久化</td></tr>
+<tr><td>2026-05-19~24</td><td>v5.1</td><td><b>决策引擎重写</b>：止损改单一 25% 百分比 + 三档入场分类（LLM 分类收敛/混合/事件）；不对称触发价（TP=best_bid / SL=cur，修 Dell 式假触发）；avg_price 口径确立</td></tr>
+<tr><td>2026-05-24</td><td>v5.6</td><td>版本重编号，技术报告收录完整版本史</td></tr>
+<tr><td>2026-05-29~30</td><td>v5.7</td><td>Dashboard 鉴权（Tailscale + 密码 + 限流）；13 处编程层 bug 修复；私有开发/公开发布双仓工具</td></tr>
+<tr><td>2026-05-31</td><td>v5.8</td><td>持仓 tab + 批量重评 prompt 复制；chip 状态生命周期（复制即标记）</td></tr>
+<tr><td>2026-06-01~03</td><td>v5.9~5.10</td><td>DISCOVERY 自动注入 cluster 字典；三层强制中文输出；往期仓位监测页 + 科研级 analytics</td></tr>
+<tr><td>2026-06-12</td><td>v5.11~5.12</td><td>网站美化 + Claude JSON 快速通道；手机只读版 /m</td></tr>
+<tr><td>2026-06-18~19</td><td>v6.0.x</td><td><b>自动重评体系</b>：并发锁 + 卡死复位；API 紧急暂停开关；重评节流（6h 基线 + 再亏 10pp 触发）；GLM 参数拉满（glm-5.2 + thinking + search_pro）+ JSON 正则兜底</td></tr>
+<tr><td>2026-06-22</td><td>v7.0~7.1</td><td>出场策略重设计（修「卖飞赢家」「绕一圈回原点」）；测试仓 paper trading 两阶段；全面 bug 审计</td></tr>
+<tr><td>2026-07-06~08</td><td>v7.4.4~7.4.6</td><td>混合型改移动止损（峰值回撤 35%）；混合型砸穿直接平仓不走重评；入场价记录 bug 修复</td></tr>
+<tr><td>2026-07-09~13</td><td>v7.5.2~7.5.4</td><td>GLM 重评 token 预算给足；事件型禁止 API 取消止损；交易复盘报告 + /report 手机页</td></tr>
+<tr><td>2026-07-24</td><td>—</td><td><b>老 bot 终止</b>（空转 11 天后用户拍板杀掉），账户转为 AUTO 的 Bench 对照账户；自动备份停在当日 12:00</td></tr>
+</table>
+
+<h3>阶段③（全自动 AUTO，2026-07 ~ 2026-09）</h3>
+<table>
+<tr><th style="width:92px">日期</th><th style="width:88px">版本</th><th>内容</th></tr>
+<tr><td>2026-07-06</td><td>fork</td><td>从半自动 v7.4.3 fork 独立副本（无历史/密钥/数据），确立隔离铁律、端口 5052</td></tr>
+<tr><td>2026-07-07</td><td>—</td><td>入口改名 autobot.py + restart.sh（结构性防误杀：老文档的 pkill main.py 永远打不到本进程）</td></tr>
+<tr><td>2026-07-08</td><td>—</td><td><b>史上最长一天</b>：第 1 步定时扫描 / 第 2 步 GLM 选品 / 第 2.5 步每日全仓巡检重评上线；sig=3 + client 1.0.2 攻坚成功、真钱闭环验证；第 3+4 步自动下单上线 = <b>全自动激活</b>；体育误买事故 → 宇宙闸门；tags 铁律（动态 tag 功能整体删除）；单 tag &lt;5 候选不送 GLM；全代码审查 16 项修复；Claude 仅作 GLM 故障兜底</td></tr>
+<tr><td>2026-07-09</td><td>—</td><td>GLM 多轮自主搜索 agent（搜→想→再搜，上限 8 轮）；输出 65536 tokens、温度 0.3；巡检 10:00→15:00；流式管道收尾（扫一个喂一个 + 有推荐立刻下单）</td></tr>
+<tr><td>2026-07-10</td><td>—</td><td>反向推荐触发持仓重评（理由原文注入 prompt）；关键词黑名单；每日巡检 4 路并发</td></tr>
+<tr><td>2026-07-11</td><td>—</td><td>Kelly 本金冻结 $50（加钱多开仓、不放大单仓）；AUTO 技术报告 + 双语 README</td></tr>
+<tr><td>2026-07-12</td><td><b>v8.0.0</b></td><td>AUTO 独立版本线起点；全自动监控主页（按天战报/事件中心/重评卡）；黑名单改「只进测试仓」；信心乘数 ×1.25/1.0/0.75；Politics tag 删除（内容过滤必拦）；8.0.1~8.0.4 页面连调四版</td></tr>
+<tr><td>2026-07-16</td><td>v8.0.5</td><td>资产曲线出入金校正（入金不再把曲线搞断）</td></tr>
+<tr><td>2026-07-18</td><td>v8.0.6<br>v8.1.0<br>v8.2.0<br>v8.3.0</td><td>删月度回撤预算闸（$30 打满全拒新单）；<b>事件型 −50% 硬止损 + 删 exit 护栏</b>（GLM 判 exit 立刻执行）；<b>q 校准挪到 Python、系数 0.5→0.8</b>（信自己八成）；收敛型砸穿直接平仓 + 盘中重评改「最好点回撤 5pp 触发」+ 删 cancel_autostop</td></tr>
+<tr><td>2026-07-20~21</td><td>v8.3.1~8.3.3</td><td>历史页折叠；单 tag 20 分钟硬熔断（GLM 挂死不再冻结整轮）；prompt 五折校准物理删除（原始输出什么就是什么）</td></tr>
+<tr><td>2026-07-23</td><td>v8.3.3<br>v8.4.0</td><td>单仓硬顶 $15→$5（用户嫌单仓占比太大）；<b>Bench 基准策略</b>（照单全收/$2/亏30%即卖/双台账，测 GLM 裸预测准确率）；亏损复盘报告</td></tr>
+<tr><td>2026-07-24</td><td>v8.4.1<br>v8.5.0~8.5.3</td><td>Bench 转真钱（老账户 $90.47 接入）+ /bench 独立页；<b>Shadow 低价拿到底</b>（≤0.40/$2/−60%止损拿到结算，止损值来自 18 条低价仓回撤研究）；Shadow 转真钱（第三账户）+ /shadow 页；churn 事后审判报告</td></tr>
+<tr><td>08-12~08-27</td><td>—</td><td><b>停机窗口</b>（bot 未运行）。期间智谱改了 Web Search API：无视 count 参数恒返 50 条</td></tr>
+<tr><td>2026-08-27</td><td>v8.5.4</td><td>复跑；资产曲线剔除停机空档 + 开机假点；三账户综合报告生成器（资产真相口径铁律）</td></tr>
+<tr><td>2026-09-01</td><td><b>v8.5.5</b></td><td><b>停掉全部付费 API</b>（用户令）：根因 = 智谱搜索恒返 50 条 → context 从 15 万顶到 30~50 万 tokens → 7 天 13 次撞 20 分钟熔断 + prompt tokens 翻倍烧钱。选品 key 停用、重评全关（顺带修了紧急暂停挡不住每日巡检的 bug）；只留免费盯盘/止损/三个监控页守仓</td></tr>
+<tr><td>2026-09-20</td><td>封存</td><td>项目宣布封存，全部代码/数据/密钥/历史归档至本文件夹</td></tr>
+</table>
+
+<h2>五、系统架构终版一览（大白话）</h2>
+<ul>
+<li><b>一个进程管三个账户</b>：autobot.py（端口 5052）里跑主策略 + Bench + Shadow 三个隔离实例，各自的私钥/资金/表互不可见，同凭据守卫防止配串。</li>
+<li><b>选品链</b>：定时扫描 27 个白名单 tag（medium 档）→ 每个 tag 候选 ≥5 才送 GLM（选品 key）→ GLM 多轮搜索后出 JSON 推荐 → 价格 0.40~0.85 真买（Kelly $50 冻结本金 + 信心乘数 + $1~5 硬边界），其余进免费测试仓 → Bench 照单全收、Shadow 只吃 ≤0.40 的那半。</li>
+<li><b>守仓链</b>（纯价格逻辑，零 API，封存时仍在跑）：收敛型峰值回撤 20%（≤3 天 12%）、混合型 35%、事件型 −50% 硬止损 + $0.05 地板，连拍确认后直接平仓；止盈翻倍全卖/0.92 卖半等梯队。</li>
+<li><b>重评链</b>（已停）：事件型从最好点回撤 5pp 触发一次 + 每日 15:00 全仓巡检；GLM 重评 key，Claude 只作故障兜底；方向纠错反问闸防数字填反。</li>
+<li><b>页面</b>：主页监控（资产曲线/按天战报/事件中心）+ /auto 候选 + /paper 测试仓 + /history + /bench + /shadow + 手机版 /m。</li>
+<li><b>安全设计</b>：宇宙闸门（白名单 tag + 扫描报告双重验证）、黑名单只进测试仓、防对锁、临下单 3pp 漂移复核、DNS 污染防护、pending 先落库防崩溃重复买。</li>
+</ul>
+
+<h2>六、事故簿（都值得记住）</h2>
+<table>
+<tr><th style="width:110px">日期</th><th>事故 / 教训</th></tr>
+<tr><td>2026-07-08</td><td><b>体育误买</b>：E2E 测试往流水线注入了宇宙外的体育市场（法国世界杯），被真钱买入。用户震怒，立即清仓（磨损几分钱）。由此诞生宇宙闸门铁律：测试永远只用白名单内真实市场。</td></tr>
+<tr><td>2026-07-08</td><td><b>sig 折腾一下午</b>：新账户余额 $0 + 「maker address not allowed」，私钥和地址其实从头到尾都是对的——答案是新架构存款钱包必须 POLY_SIGNATURE_TYPE=3 + client 1.0.2。教训：别拿老账户经验套新架构。</td></tr>
+<tr><td>2026-07-20</td><td><b>GLM 调用挂死 2 小时</b>：Iran 汇总调用无响应，冻结整轮选品还攥着锁。修复 = 单 tag 20 分钟硬熔断。</td></tr>
+<tr><td>2026-07-21</td><td><b>单仓过大</b>：地震仓公式给到 $11 ≈ 本金 11%，用户裁定硬顶 $15→$5。</td></tr>
+<tr><td>08-12~08-27</td><td><b>上游偷偷改 API</b>：智谱 Web Search 无视 count 恒返 50 条。我方代码一行没动，复跑后 context 翻倍、13 次熔断、账单翻倍。教训：依赖的上游 API 行为要有监控/断言，「代码没动 ≠ 系统没变」。</td></tr>
+<tr><td>2026-08-27</td><td><b>台账会撒谎</b>：归零卖不掉的废仓和 vanished 仓永不进台账，只看台账会高估战绩。确立「以资产真相为准」口径铁律。另有卖不掉的仓每 30 秒无限重试卖出的老 monitor 行为（按铁律不能改，记档）。</td></tr>
+<tr><td>持续</td><td><b>本机 DNS 污染</b>：*.polymarket.com 间歇性解析失败，DNS guard 一旦删除全 bot 静默瘫痪。</td></tr>
+<tr><td>持续</td><td><b>智谱内容过滤</b>：Politics 等敏感 tag 3/3 轮必拦（后 China 也中招），只能从白名单移除。</td></tr>
+</table>
+
+<h2>七、如果以后重启，还能改什么（按优先级）</h2>
+<ol>
+<li><b>修智谱搜索 50 条问题</b>（恢复 API 的前提）：不等上游，客户端拿到结果自己截断 items 到 15 条再喂 GLM。修法已明确，一处小改。</li>
+<li><b>用 Bench 数据反哺选品</b>：实测数据已经指明——低价区（&lt;40¢）判对率 11/45，应直接禁买或大幅降权；40-80¢ 判对率 ~70% 才是能吃的区间。现在的 0.40~0.85 分流线歪打正着挡掉了最差区间，但 Shadow 实验证明低价「拿到底」策略整体不成立。</li>
+<li><b>q 校准系数用数据定</b>：AUTO_Q_TRUST=0.8 是拍的。146 条已结算的 bench 样本足够回归一条「GLM 报的 q vs 实际胜率」校准曲线，代替拍脑袋。</li>
+<li><b>仓位经济学</b>：$2~5 仓位下凑整/点差/废仓磨损占比太大。要么本金上量让单仓 ≥$20，要么承认小资金下该策略成本结构不成立。</li>
+<li><b>上游 API 行为断言</b>：对搜索返回条数、token 用量、单轮耗时设告警线，异常自动暂停烧钱链路（这次 13 次熔断烧了半个月才被发现）。</li>
+<li><b>废仓处理模块</b>：卖不掉的仓无限重试问题要修得开独立新文件（monitor 按铁律不能改），加退避 + 尘埃仓强制核销。</li>
+<li><b>台账自动对账</b>：每日把逐笔台账合计和资产真相对一次，差额超阈值上红色警示，别等月末人肉复盘才发现高估。</li>
+<li><b>多模型对照</b>：整个实验只测了 GLM 一家。Bench 框架现成，接入第二家模型（Claude/DeepSeek 等）跑同一批市场，才能分清「AI 不行」还是「GLM 不行」。</li>
+<li><b>通知渠道 / watchdog</b>：当初用户拍板不做（自己定期看盘）。真要长期无人值守，进程死了没人知道是硬伤。</li>
+<li><b>更长实验周期</b>：5 个月里真正三账户并跑只有 ~2 个月且中间停机半个月，样本量（146 条结算）对 5 个价位桶来说仍偏薄。</li>
+</ol>
+
+<h2>八、封存说明</h2>
+<h3>档案结构（本文件夹）</h3>
+<table>
+<tr><th>文件夹</th><th>内容</th></tr>
+<tr><td><code>00_封存总报告/</code></td><td>本报告（PDF + 可编辑 Word/HTML）+ 封存日重跑的三账户终版报告</td></tr>
+<tr><td><code>01_史前_v1_polymarket-bot_Gemini浏览器自动化_2026-04-08_至_04-16/</code></td><td>~/polymarket-bot + 04-15 全量备份 + 两个配套 Chrome profile（copy 那个 2.7G 大部分是浏览器缓存）+ _local_secrets</td></tr>
+<tr><td><code>02_v3_半自动初版_2026-04-27_冻结/</code></td><td>~/polymarket-semi-auto 完整拷贝（含 git 历史、数据库 semi_auto.db、英文技术文档）</td></tr>
+<tr><td><code>03_半自动主项目_v4至v7_2026-05-09_至_2026-07-24/</code></td><td>~/polymarket 完整拷贝（含 3378 次提交的 git 历史、v4.db 及历次备份、<b>past/ 目录里还嵌着 v4/v5/v5.6~5.9 各代码归档</b>、两份 v7.5.4 PPT、SECURITY 文档、research_data）</td></tr>
+<tr><td><code>04_全自动AUTO_v8_2026-07-06_至_2026-09-20_封存/</code></td><td>~/polymarket-auto 完整拷贝（含 git 历史、v4.db + 封存日一致性快照 <code>v4.db.封存快照_20260920</code>、.env 密钥、全部 bot 日志约 1.5G、6 份历史 PDF 报告、4 份分享 PPT、vendored py_clob_client_v2）</td></tr>
+<tr><td><code>05_散落文件_早期文档_研究PDF_Claude记忆/</code></td><td>Downloads 里的 v1/v2/v3 技术文档 docx 与 5 月份研究分析 PDF、polymarket-bot.zip×2、两个项目的 Claude 记忆库（含全部会话记录）、个人网站分享页素材</td></tr>
+<tr><td><code>06_支线_天气bot_每日最高温市场_2026-07-12起_端口5053/</code></td><td>~/天气 完整拷贝：Polymarket 每日最高温市场套利支线（独立钱包 .env、独立 git、weather.db），封存时未在运行</td></tr>
+</table>
+<h3>密钥与资金（按用户指示：留在档案里，本地保管）</h3>
+<ul>
+<li>主线三套账户凭据都在 <code>04_.../.env</code>：主账户 POLY_*（sig=3）、Bench BENCH_POLY_*（老账户，sig=1）、Shadow SHADOW_POLY_*（sig=3）；另有两把智谱 key（DISCOVERY 已改名 _OFF 停用）和 Claude 兜底 key；天气 bot 支线的独立钱包在 <code>06_.../.env</code>。</li>
+<li>封存日三账户链上仍有资产合计约 $154.58（主账户尚持 27 个仓位等结算）。<b>档案含真实私钥，此文件夹勿上传网盘/勿发给任何人。</b></li>
+</ul>
+<h3>如果哪天想重新跑起来</h3>
+<ol>
+<li>工作目录用原目录 ~/polymarket-auto（或把 04 拷回去），<code>bash restart.sh</code> 启动（端口 5052）。</li>
+<li>恢复 AI：.env 里 <code>ZHIPUAI_API_KEY_DISCOVERY_OFF</code> 改回 <code>ZHIPUAI_API_KEY_DISCOVERY</code>；主页「API模式」取消暂停。<b>但先做上面第七节第 1 条的搜索截断修复，否则又会烧钱撞熔断。</b></li>
+<li>老项目 5051 的 bot <b>永远不要再启动</b>——它的 monitor 会按老策略卖 Bench 的仓。</li>
+</ol>
+
+<h2>附：历史报告与文档索引（均在档案内）</h2>
+<ul class="small">
+<li>04/运行诊断报告-2026-07-18.pdf、运行诊断报告-2026-07-20.pdf — 运行体检</li>
+<li>04/测试仓研究报告-2026-07-21.pdf — 低价仓回撤研究（Shadow −60% 止损值的依据）</li>
+<li>04/亏损复盘报告-2026-07-23.pdf、churn事后审判报告-2026-07-24.pdf — 7 月亏损与换手复盘</li>
+<li>04/三账户报告-2026-08-27.pdf — 三账户中期对照；00/ 内有封存日终版</li>
+<li>04/技术报告.md、CLAUDE.md — 全自动系统的完整技术文档与规则史；03/技术报告.md — 半自动 v7.5 技术报告</li>
+<li>04/Polymarket_AUTO_项目分享_v8.3.3 / v8.5.3 / v8.5.4 / v8.5.5.pptx；03/Polymarket_Bot_项目分享_v7.5.4.pptx、策略总览_v7.5.4.pptx</li>
+</ul>
+
+<p class="small" style="margin-top:30px; border-top:1px solid #ccd; padding-top:10px;">报告生成于 2026-09-20 · 数字来源：封存当天实跑的只读三账户报告脚本 + 各账户实时 holdings API + git 历史 · 本报告另有可编辑版（.docx / .html）同目录存放</p>
+
+</body>
+</html>

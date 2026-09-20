@@ -1,0 +1,39 @@
+# === 敏感数据 (绝对不要提交) ===
+.env
+*.env
+
+# === 数据库与日志 ===
+semi_auto.db
+*.db
+*.db-journal
+bot.log
+output.log
+last_scan.md
+*.log
+
+# === 备份文件 ===
+*.bak
+*.bak[0-9]*
+*.bak_*
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# === 系统 ===
+Thumbs.db

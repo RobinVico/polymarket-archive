@@ -1,0 +1,1056 @@
+#!/usr/bin/env python3
+"""全自动监控主页 (2026-07-09 用户拍板重做界面; 07-09 二次: 复用老 dashboard 的设计系统重新美化)。
+
+背景: 老 dashboard.py 的主页/操控页是半自动时代的 (手动算金额/手动粘 Claude JSON/手动填 q/tier/
+手动确认重评/在线离线切换…), 全自动全用不上。用户要一个"监控自动化"的页面: 每天下了什么舱/多少钱、
+有哪些警报、卖了啥、当前持仓盈亏、GLM 选品跑得怎样、重评巡检结果。
+
+美化: 用户 (2026-07-09) 反馈首版太粗糙/太乱 → 本页整套 CSS 设计令牌、字体 (Space Grotesk + JetBrains
+Mono)、渐变卡片、区块标签、指标磁贴、资产曲线 (Chart.js 4.4.1, 全宽) 全部照抄老 dashboard.py 的风格,
+只保留新加的监控内容 (按天战报 / 警报 / 重评巡检 / 选品状况 / 未成交候选)。
+
+隔离铁律 (CLAUDE.md): 绝不改 dashboard.py。本文件是独立新文件, 路由从 autobot.py 挂载:
+  - `/` 主页 → 由 autobot 把 app.view_functions['index'] 覆盖成本页 (老 index 代码原样留着不再被访问);
+  - `/monitor` 直达同一页 (稳定 URL);
+  - `/api/auto/monitor` 聚合接口 (按天战报 + 警报 + 选品 + 候选 + 重评);
+  - `/panel` `/api_reeval` → autobot 覆盖成跳回 `/` (半自动页, 用户点名删)。
+
+数据全部复用现成表/接口, 不碰后端逻辑:
+  持仓+盈亏 /api/snapshot · 资产曲线 /api/portfolio_history · 应急停止 /api/control(stop) ·
+  单仓清仓 /api/force_exit · 本文件只多一个只读聚合 /api/auto/monitor。
+"""
+import os
+import logging
+from datetime import datetime
+
+log = logging.getLogger("auto_dashboard")
+
+_WD = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+# 出入金跳变识别阈值 (2026-07-16 用户: 入金把曲线搞断): 相邻快照 |Δcash| ≥ 这个数才算出入金候选
+DEPOSIT_JUMP_MIN = float(os.environ.get("AUTO_DEPOSIT_JUMP_MIN", "5"))
+
+
+def _adjusted_portfolio_history(rng):
+    """出入金校正后的资产曲线 (2026-07-16 用户拍板: 入金 $50 把总值曲线搞断 → 要曲线保持正常)。
+    识别: 相邻快照 |Δcash| ≥ DEPOSIT_JUMP_MIN 且 Δassets ≈ Δcash (容差 max($2, 10%)) = 出/入金
+          —— 买卖/结算兑付都是 现金↔持仓 对倒, Δassets≈0, 不会误判 (实测 422 快照只命中两次真实入金)。
+    校正: 每个点加上"该点之后发生的出入金净额" → 入金前的历史整体抬到当前本金口径:
+          曲线连续、终点=真实总资产、任意区间涨跌=纯交易盈亏。老接口 /api/portfolio_history 不动。
+    附带把"入金前预热点"裁剪从前端挪到这里 (对原始值判断更准)。"""
+    from modules.db import get_portfolio_history
+    import time as _t
+    now = int(_t.time())
+    since = {"1d": now - 86400, "1w": now - 7 * 86400, "1m": now - 30 * 86400,
+             "1y": now - 365 * 86400}.get(rng, 0)
+    rows = get_portfolio_history(0, max_points=100000)   # 全量拉 (识别必须看完整相邻序列)
+    if not rows:
+        return {"ok": True, "range": rng, "points": [], "deposits": [], "note": ""}
+    # 前缀预热点裁剪 (原前端逻辑): 还没入金那会儿的零星小点, 会把 y 轴拉出大跨度
+    mx = max((r.get("assets_total") or 0) for r in rows)
+    i0 = 0
+    while i0 < len(rows) and (rows[i0].get("cash") or 0) <= 0.005 and (rows[i0].get("assets_total") or 0) < mx * 0.2:
+        i0 += 1
+    if 0 < i0 < len(rows):
+        rows = rows[i0:]
+    # 识别出入金 (金额取 Δcash; 同一间隔里顺带的小幅行情波动保留在曲线里)
+    deposits = []
+    for a, b in zip(rows, rows[1:]):
+        dc = (b.get("cash") or 0) - (a.get("cash") or 0)
+        da = (b.get("assets_total") or 0) - (a.get("assets_total") or 0)
+        if abs(dc) >= DEPOSIT_JUMP_MIN and abs(da - dc) <= max(2.0, abs(dc) * 0.1):
+            deposits.append({"ts": b["ts"], "amount": round(dc, 2)})
+    total = sum(d["amount"] for d in deposits)
+    out = []
+    cum = 0.0
+    di = 0
+    for r in rows:
+        while di < len(deposits) and deposits[di]["ts"] <= r["ts"]:
+            cum += deposits[di]["amount"]
+            di += 1
+        adj = total - cum   # 该点之后还会发生的出入金 → 抬平历史
+        at = (r.get("assets_total") or 0) + adj
+        tc, ch = r.get("total_cost"), r.get("cash")
+        cost_line = (tc + ch + adj) if (tc is not None and ch is not None) else None
+        out.append({"ts": r["ts"], "assets_total": round(at, 4), "cost_line": cost_line,
+                    "cash": ch, "total_value": r.get("total_value"), "adj": round(adj, 2)})
+    if since:
+        out = [p for p in out if p["ts"] >= since]
+    note = ""
+    if deposits:
+        note = "已校正出入金: " + ", ".join(
+            ("%s$%.2f" % ("+" if d["amount"] >= 0 else "-", abs(d["amount"]))) for d in deposits)
+    return {"ok": True, "range": rng, "points": out, "deposits": deposits, "note": note}
+
+
+def _build_monitor_payload():
+    """只读聚合: 把 events / auto_trades / auto_discovery_runs / auto_candidates /
+    auto_reeval_suggestions / app_state 揉成监控页要的结构。每段各自 try, 一张表坏不拖垮整页。"""
+    from modules.db import get_conn, get_recent_events, get_app_state, _parse_iso_to_aware
+
+    payload = {"ok": True, "days": [], "alerts": [], "discovery_runs": [],
+               "candidates_pending": [], "reeval": {"last_slot": None, "recent": []},
+               "events": [], "version": ""}
+    try:
+        from modules.version import VERSION
+        payload["version"] = VERSION
+    except Exception:
+        pass
+
+    def local_date(iso):
+        dt = _parse_iso_to_aware(iso)
+        return dt.astimezone().strftime("%Y-%m-%d") if dt else ""
+
+    def local_hm(iso):
+        dt = _parse_iso_to_aware(iso)
+        return dt.astimezone().strftime("%H:%M") if dt else ""
+
+    days = {}
+
+    def day(d):
+        if not d:
+            d = "?"
+        if d not in days:
+            days[d] = {"date": d, "buys": [], "sells": [], "alerts": [], "paper": 0, "usd_buy": 0.0}
+        return days[d]
+
+    # slug → 好看标题 (auto_trades 只存 slug, 事件卖出存的是标题)
+    title_by_slug = {}
+    try:
+        conn = get_conn()
+        for r in conn.execute("SELECT slug, title FROM auto_candidates WHERE title IS NOT NULL AND title != ''"):
+            if r["slug"] and r["slug"] not in title_by_slug:
+                title_by_slug[r["slug"]] = r["title"]
+        conn.close()
+    except Exception as e:
+        log.warning(f"title map failed: {e}")
+
+    # ---- 买入: auto_trades (成交台账, usd 精确) ----
+    try:
+        conn = get_conn()
+        for r in conn.execute("SELECT ts, day, slug, side, usd, note FROM auto_trades WHERE ok=1 ORDER BY id DESC LIMIT 300"):
+            d = r["day"] or local_date(r["ts"])
+            e = day(d)
+            usd = float(r["usd"] or 0)
+            e["buys"].append({"time": local_hm(r["ts"]), "title": title_by_slug.get(r["slug"], r["slug"]),
+                              "slug": r["slug"], "side": (r["side"] or "").upper(), "usd": round(usd, 2),
+                              "note": r["note"] or ""})
+            e["usd_buy"] += usd
+        conn.close()
+    except Exception as e:
+        log.warning(f"buys agg failed: {e}")
+
+    # ---- 卖出 / 无档案红警 / 测试仓计数: events ----
+    try:
+        for ev in get_recent_events(500):
+            et = ev.get("event_type")
+            ts = ev.get("timestamp")
+            d = local_date(ts)
+            if et in ("auto_sell", "user_sell"):
+                day(d)["sells"].append({"time": local_hm(ts),
+                                        "label": "自动卖出" if et == "auto_sell" else "手动/清仓",
+                                        "title": (ev.get("market_slug") or "").strip(),
+                                        "detail": (ev.get("detail") or "").strip()})
+            elif et == "no_meta_alert":
+                a = {"level": "red", "time": local_hm(ts), "date": d, "kind": "无档案仓",
+                     "title": (ev.get("market_slug") or "").strip(), "detail": (ev.get("detail") or "").strip()}
+                day(d)["alerts"].append(a)
+                payload["alerts"].append(a)
+            elif et == "paper_add":
+                day(d)["paper"] += 1
+    except Exception as e:
+        log.warning(f"events agg failed: {e}")
+
+    # ---- GLM 选品运行状况 + 报错/超时黄警 ----
+    try:
+        conn = get_conn()
+        for r in conn.execute("SELECT scan_slot, tag, ok, n_recs, n_invalid, tokens_prompt, tokens_completion, error, started_at "
+                              "FROM auto_discovery_runs ORDER BY id DESC LIMIT 60"):
+            err = (r["error"] or "").strip()
+            payload["discovery_runs"].append({
+                "slot": r["scan_slot"], "tag": r["tag"], "ok": r["ok"], "n_recs": r["n_recs"],
+                "n_invalid": r["n_invalid"],
+                "tokens": "%d+%d" % (r["tokens_prompt"] or 0, r["tokens_completion"] or 0),
+                "error": err})
+            if err:
+                d = local_date(r["started_at"])
+                a = {"level": "yellow", "time": local_hm(r["started_at"]), "date": d, "kind": "GLM选品报错",
+                     "title": "标签 " + (r["tag"] or "?"), "detail": err}
+                payload["alerts"].append(a)
+                day(d)["alerts"].append(a)
+        conn.close()
+    except Exception as e:
+        log.warning(f"discovery agg failed: {e}")
+
+    # ---- 未成交候选 (GLM 选了但没成真仓) + 宇宙外/防对锁 黄/灰警 ----
+    try:
+        conn = get_conn()
+        for r in conn.execute("SELECT created_at, tag, title, slug, side, cur_price, q, route, status "
+                              "FROM auto_candidates ORDER BY id DESC LIMIT 120"):
+            status = (r["status"] or "").strip()
+            # 真的成了活着的真仓 → 不算"未成交"
+            if status.startswith("bought") and "已清仓" not in status:
+                continue
+            cand = {"time": local_hm(r["created_at"]), "date": local_date(r["created_at"]),
+                    "tag": r["tag"], "title": r["title"] or r["slug"], "slug": r["slug"],
+                    "side": (r["side"] or "").upper(),
+                    "cur_price": r["cur_price"], "q": r["q"], "route": r["route"], "status": status}
+            payload["candidates_pending"].append(cand)
+            if any(k in status for k in ("宇宙", "非白名单", "防对锁")):
+                lvl = "gray" if "已持有" in status else "yellow"
+                a = {"level": lvl, "time": cand["time"], "date": cand["date"], "kind": "候选被拒",
+                     "title": cand["title"], "detail": status}
+                payload["alerts"].append(a)
+        conn.close()
+    except Exception as e:
+        log.warning(f"candidates agg failed: {e}")
+
+    # ---- 自动重评建议 (2026-07-12 用户: 老页整块搬来, 只读展示 — 全自动执行, 无需任何操作) ----
+    try:
+        payload["reeval"]["last_slot"] = get_app_state("auto_daily_reeval_last_slot")
+        import json as _json
+        conn = get_conn()
+        for r in conn.execute("SELECT id, title, slug, side, action, reason, status, created_at, "
+                              "orig_q, new_q, trigger_reason, headline_event, provider, "
+                              "loss_pct, confidence, thesis_broken, error, sources "
+                              "FROM auto_reeval_suggestions ORDER BY id DESC LIMIT 30"):
+            try:
+                srcs = _json.loads(r["sources"] or "[]")
+                srcs = [str(u) for u in srcs][:5] if isinstance(srcs, list) else []
+            except Exception:
+                srcs = []
+            payload["reeval"]["recent"].append({
+                "id": r["id"],
+                "date": local_date(r["created_at"]), "time": local_hm(r["created_at"]),
+                "title": r["title"] or r["slug"] or "", "side": (r["side"] or "").upper(),
+                "action": (r["action"] or "").strip(), "status": (r["status"] or "").strip(),
+                "orig_q": r["orig_q"], "new_q": r["new_q"], "loss_pct": r["loss_pct"],
+                "confidence": (r["confidence"] or "").strip(),
+                "thesis_broken": bool(r["thesis_broken"]),
+                "trigger": (r["trigger_reason"] or "").strip(),
+                "headline": (r["headline_event"] or "").strip()[:160],
+                "provider": (r["provider"] or "").strip(),
+                "error": (r["error"] or "").strip()[:200],
+                "sources": srcs,
+                "reason": (r["reason"] or "").strip()[:300]})
+        conn.close()
+    except Exception as e:
+        log.warning(f"reeval agg failed: {e}")
+
+    # ---- 操作记录 (老页 📝 整块搬来, 只读): 全部事件流 ----
+    try:
+        for ev in get_recent_events(150):
+            payload["events"].append({
+                "date": local_date(ev.get("timestamp")), "time": local_hm(ev.get("timestamp")),
+                "type": ev.get("event_type") or "", "title": (ev.get("market_slug") or "").strip(),
+                "detail": (ev.get("detail") or "").strip()})
+    except Exception as e:
+        log.warning(f"events feed failed: {e}")
+
+    # ---- 组装按天战报 (新→旧) ----
+    for d in sorted(days.keys(), reverse=True):
+        e = days[d]
+        try:
+            wd = _WD[datetime.strptime(d, "%Y-%m-%d").weekday()]
+        except Exception:
+            wd = ""
+        payload["days"].append({**e, "weekday": wd, "usd_buy": round(e["usd_buy"], 2),
+                                "n_buy": len(e["buys"]), "n_sell": len(e["sells"]),
+                                "n_alert": len(e["alerts"])})
+
+    payload["alerts"].sort(key=lambda a: (a.get("date", ""), a.get("time", "")), reverse=True)
+    payload["alerts"] = payload["alerts"][:40]
+    return payload
+
+
+def _build_holdings():
+    """当前持仓 (rich, 跟老主页「当前持仓(只看)」面板同字段): 入场价/当前价/份数/价值/盈亏/
+    q·信心·止损档/决策状态。数据 = Executor 实时缓存 + position_meta。顺带算顶部四个指标。
+    (老 /api/snapshot 不吐 confidence/stop_loss_tier, 故本模块自己读 meta 补全, 显示不缩水。)"""
+    from modules.executor import Executor
+    from modules.db import get_position_meta
+    from datetime import datetime, timezone
+    exe = Executor.get()
+    positions = exe.get_positions_cached()
+    cash_raw = exe.get_cash_cached()
+    cash = cash_raw if cash_raw is not None else 0
+    rows = []
+    total_pnl = total_cost = total_value = 0.0
+    for p in positions:
+        cp = p.get("cur_price") or 0
+        ap = p.get("avg_price") or 0
+        sz = p.get("size") or 0
+        asset = p.get("asset", "")
+        meta = get_position_meta(asset) or {}
+        pnl_pct = ((cp - ap) / ap * 100) if ap > 0 else 0
+        pd = (cp - ap) * sz
+        days_left = None
+        ed = meta.get("end_date") or ""
+        if ed:
+            try:
+                edt = datetime.fromisoformat(str(ed).replace("Z", "+00:00"))
+                if edt.tzinfo is None:
+                    edt = edt.replace(tzinfo=timezone.utc)
+                days_left = (edt - datetime.now(timezone.utc)).days
+            except Exception:
+                pass
+        rows.append({
+            "asset": asset, "title": p.get("title", "") or "", "side": (p.get("side") or "").upper(),
+            "avg_price": ap, "cur_price": cp, "size": sz, "value": cp * sz,
+            "pnl_pct": pnl_pct, "pnl_dollar": pd, "days_left": days_left,
+            "q": meta.get("new_tp") or meta.get("tp"),
+            "confidence": meta.get("original_confidence"),
+            "stop_loss_tier": meta.get("stop_loss_tier"),
+            "monitor_state": meta.get("monitor_state"),
+            "autostop_disabled": bool(meta.get("autostop_disabled")),
+        })
+        total_pnl += pd
+        total_cost += ap * sz
+        total_value += cp * sz
+    return {"ok": True, "positions": rows, "total_pnl": total_pnl, "total_cost": total_cost,
+            "total_value": total_value, "cash": cash, "assets_total": total_value + cash,
+            "position_count": len(rows)}
+
+
+def register_routes(app):
+    from flask import jsonify
+
+    @app.route("/monitor")
+    def auto_monitor_page():
+        return MONITOR_HTML
+
+    @app.route("/api/auto/monitor")
+    def auto_monitor_api():
+        try:
+            return jsonify(_build_monitor_payload())
+        except Exception as e:
+            log.exception(f"/api/auto/monitor failed: {e}")
+            return jsonify({"ok": False, "message": str(e), "days": [], "alerts": [],
+                            "discovery_runs": [], "candidates_pending": [],
+                            "reeval": {"last_slot": None, "recent": []}})
+
+    @app.route("/api/auto/portfolio_history")
+    def auto_portfolio_history_api():
+        from flask import request as _rq
+        rng = (_rq.args.get("range") or "1w").lower()
+        try:
+            return jsonify(_adjusted_portfolio_history(rng))
+        except Exception as e:
+            log.exception(f"/api/auto/portfolio_history failed: {e}")
+            return jsonify({"ok": False, "message": str(e), "points": [], "deposits": [], "note": ""})
+
+    @app.route("/api/auto/holdings")
+    def auto_holdings_api():
+        try:
+            return jsonify(_build_holdings())
+        except Exception as e:
+            log.exception(f"/api/auto/holdings failed: {e}")
+            return jsonify({"ok": False, "message": str(e), "positions": [], "total_pnl": 0,
+                            "total_cost": 0, "total_value": 0, "cash": 0, "assets_total": 0,
+                            "position_count": 0})
+
+    # autobot 会用它覆盖 app.view_functions['index'] → `/` 直接出监控页
+    return auto_monitor_page
+
+
+# ============================================================================
+# 页面 — 设计系统整段复用 dashboard.py 的老风格 (令牌/字体/卡片/曲线), 只装新内容
+# ============================================================================
+MONITOR_HTML = r"""<!DOCTYPE html>
+<html lang="zh"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🤖 全自动监控</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+:root{--bg:#0a0a14;--sf0:#0f0f1c;--sf:#16162a;--sf2:#1c1c36;--sf3:#23234a;--bd:rgba(255,255,255,0.06);--bd2:rgba(255,255,255,0.10);--tx:#e8e8ff;--tx2:#9898c8;--tx3:#6868b0;--ac:#00e5a0;--ac2:#00c8ff;--rd:#ff4070;--am:#ffc040;--vi:#8060ff;--acd:rgba(0,229,160,0.10);--rdd:rgba(255,64,112,0.10)}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:'Space Grotesk',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;background-image:radial-gradient(ellipse 1400px 700px at 50% -10%,rgba(0,200,255,0.05),transparent 65%),radial-gradient(ellipse 800px 500px at 90% 100%,rgba(128,96,255,0.04),transparent 60%);background-attachment:fixed;position:relative}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,0.012) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.012) 1px,transparent 1px);background-size:32px 32px;pointer-events:none;z-index:0}
+nav{background:rgba(10,10,20,0.72);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);border-bottom:1px solid var(--bd);padding:0 24px;height:56px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100;flex-wrap:wrap}
+.logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#00e5a0,#00c8ff);display:flex;align-items:center;justify-content:center;font-weight:700;color:#060610;font-size:15px}
+.nt{font-size:14px;font-weight:600}.nt span{color:var(--tx3);font-weight:400;margin-left:8px;font-size:12px;font-family:'JetBrains Mono'}
+/* Chrome 离线小恐龙 (老页原样搬入, 用户 2026-07-12): 恐龙原地, 地面/仙人掌从右往左滚, 多只恐龙挨在一起一组跳 */
+.dino-track{position:relative;flex:1;height:34px;margin-right:24px;min-width:280px;overflow:hidden;user-select:none}
+@media(max-width:900px){.dino-track{display:none}}
+.dino-track .ground{position:absolute;bottom:7px;left:0;right:0;height:1px;background:var(--tx3);opacity:0.55}
+.dino-track .cactus{position:absolute;bottom:8px;line-height:1;animation:cactus-roll 4.5s linear infinite;will-change:left}
+.dino-track .c1{animation-delay:0s;font-size:14px}
+.dino-track .c2{animation-delay:-1.5s;font-size:11px}
+.dino-track .c3{animation-delay:-3.0s;font-size:13px}
+@keyframes cactus-roll{0%{left:calc(100% + 4px)}100%{left:-22px}}
+.dino-track .dino{position:absolute;bottom:7px;line-height:1;will-change:transform;animation:dino-jump 4.5s cubic-bezier(0.45,0,0.55,1) infinite}
+.dino-track .d1{left:6px;font-size:18px}
+.dino-track .d2{left:26px;font-size:13px}
+.dino-track .d3{left:42px;font-size:15px}
+@keyframes dino-jump{
+  0%,18%,30%,52%,64%,86%,98%,100%{transform:scaleX(-1) translateY(0)}
+  20%,28%{transform:scaleX(-1) translateY(-15px)}
+  54%,62%{transform:scaleX(-1) translateY(-15px)}
+  88%,96%{transform:scaleX(-1) translateY(-15px)}
+}
+.pages-tab{display:flex;gap:6px;margin-left:8px}
+.ptab{font-size:11px;font-weight:500;padding:6px 12px;background:transparent;color:var(--tx3);border:1px solid var(--bd);border-radius:8px;cursor:pointer;text-decoration:none;transition:all .15s;white-space:nowrap}
+.ptab:hover{color:var(--tx);border-color:var(--bd2);background:var(--sf)}
+.ptab-active{background:var(--acd);color:var(--ac);border-color:rgba(0,229,160,0.35);font-weight:600}
+.nr{margin-left:auto;display:flex;align-items:center;gap:12px}
+.lp{display:flex;align-items:center;gap:5px;padding:4px 12px;background:var(--acd);border:1px solid rgba(0,229,160,0.2);border-radius:20px;font-size:10px;font-weight:600;color:var(--ac)}
+.ld{width:5px;height:5px;border-radius:50%;background:var(--ac);animation:p 2s ease-in-out infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:.3}}
+.wrap{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:20px 20px 60px}
+.sl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--tx2);margin:26px 0 12px 2px;position:relative;padding-left:12px;display:flex;align-items:center;gap:10px}
+.sl::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:14px;background:linear-gradient(180deg,var(--ac2),var(--vi));border-radius:2px}
+.sl .cnt{font-size:9px;letter-spacing:0;text-transform:none;font-weight:600}
+/* 指标磁贴 */
+.ms{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+@media(max-width:900px){.ms{grid-template-columns:repeat(2,1fr)}}
+.m{background:linear-gradient(180deg,var(--sf) 0%,var(--sf2) 100%);border:1px solid var(--bd);border-radius:14px;padding:16px 18px;position:relative;overflow:hidden;transition:transform .2s,border-color .2s,box-shadow .2s}
+.m:hover{transform:translateY(-2px);border-color:var(--bd2);box-shadow:0 8px 24px rgba(0,0,0,0.3)}
+.m::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.m.g::before{background:linear-gradient(90deg,#00e5a0,#00c8ff)}.m.r::before{background:linear-gradient(90deg,#ff4070,#ff8060)}.m.b::before{background:linear-gradient(90deg,#00c8ff,#8060ff)}.m.v::before{background:linear-gradient(90deg,#8060ff,#c060ff)}
+.mi{font-size:16px;margin-bottom:8px}.ml{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--tx3);margin-bottom:6px}
+.mv{font-size:24px;font-weight:700;font-family:'JetBrains Mono';letter-spacing:-1px}
+.msb{font-size:10px;color:var(--tx3);margin-top:6px}
+/* 操作行 */
+.op-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.opbtn{padding:7px 15px;border-radius:9px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx2);font-family:'Space Grotesk';font-size:11.5px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+.opbtn:hover{transform:translateY(-1px);filter:brightness(1.12)}
+.opbtn.stop{background:rgba(255,64,112,0.16);color:#ff5d7e;border-color:rgba(255,64,112,0.5)}
+.upd{font-size:10px;color:var(--tx3);font-family:'JetBrains Mono'}
+/* 卡片 */
+.card{background:linear-gradient(180deg,var(--sf) 0%,var(--sf2) 100%);border:1px solid var(--bd);border-radius:14px;overflow:hidden;margin-bottom:16px;transition:border-color .2s,box-shadow .2s}
+.card:hover{border-color:var(--bd2)}
+.chd{padding:14px 18px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.chd h2{font-size:12px;font-weight:600;color:var(--tx2)}
+.cnt{font-size:9px;padding:3px 8px;border-radius:8px;font-weight:600;font-family:'JetBrains Mono';background:var(--acd);color:var(--ac)}
+.cnt.dimc{background:var(--sf);color:var(--tx3);font-weight:500}
+.cb{max-height:520px;overflow-y:auto;scrollbar-width:thin;padding:4px 0}
+.cb::-webkit-scrollbar{width:4px}.cb::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
+.pad{padding:14px 18px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+/* 资产曲线 */
+.range-btn{padding:4px 10px;border:1px solid var(--bd);background:transparent;color:var(--tx3);border-radius:6px;cursor:pointer;font-size:11px;font-family:'JetBrains Mono';letter-spacing:.5px}
+.range-btn:hover{border-color:var(--ac2);color:var(--ac2)}
+.range-btn.active{background:rgba(0,200,255,0.1);border-color:#00c8ff;color:#00c8ff}
+#portfolio-canvas{display:block;width:100%!important;height:100%!important}
+/* 表格 */
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:9px 16px;text-align:left;vertical-align:middle;border-bottom:1px solid var(--bd)}
+tr:last-child td{border-bottom:none}
+th{color:var(--tx3);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.6px}
+tbody tr:hover{background:linear-gradient(90deg,rgba(0,200,255,0.05),transparent 80%)}
+.mono{font-family:'JetBrains Mono';font-size:11.5px}
+.dim{color:var(--tx3)}.subn{color:var(--tx3);font-size:10.5px;font-family:'JetBrains Mono'}
+.g{color:var(--ac)}.a{color:var(--am)}.r{color:var(--rd)}.b{color:var(--ac2)}.vi{color:var(--vi)}
+.side{display:inline-block;min-width:34px;text-align:center;border-radius:6px;padding:2px 7px;font-size:10.5px;font-weight:700;font-family:'JetBrains Mono'}
+.side.YES{background:rgba(0,229,160,.14);color:var(--ac);border:1px solid rgba(0,229,160,.35)}
+.side.NO{background:rgba(255,64,112,.14);color:var(--rd);border:1px solid rgba(255,64,112,.35)}
+.clr{background:rgba(255,64,112,0.12);color:#ff5d7e;border:1px solid rgba(255,64,112,0.4);border-radius:7px;padding:4px 11px;font-size:10.5px;font-weight:600;cursor:pointer;font-family:'Space Grotesk';transition:all .15s;white-space:nowrap}
+.clr:hover{background:rgba(255,64,112,0.22)}
+.route-real{color:var(--ac);font-weight:700;font-size:11px}.route-paper{color:var(--am);font-weight:700;font-size:11px}
+.empty{color:var(--tx3);font-size:12px;padding:16px 18px;text-align:center}
+/* 按天战报 (复用 details.fold 风格) */
+details.day{border:1px solid var(--bd);border-radius:14px;background:linear-gradient(180deg,var(--sf) 0%,var(--sf2) 100%);margin-bottom:10px;overflow:hidden;transition:border-color .2s}
+details.day:hover{border-color:var(--bd2)}
+details.day>summary{cursor:pointer;padding:14px 18px;font-size:12px;color:var(--tx2);user-select:none;list-style:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;transition:color .15s}
+details.day>summary::-webkit-details-marker{display:none}
+details.day>summary::before{content:'▸';color:var(--tx3)}
+details.day[open]>summary{border-bottom:1px solid var(--bd)}
+details.day[open]>summary::before{content:'▾'}
+.d-date{font-size:15px;font-weight:700;color:var(--tx);font-family:'JetBrains Mono';letter-spacing:-.5px}
+.d-wd{font-size:11px;color:var(--tx3)}
+.pill{font-size:11px;padding:3px 10px;border-radius:20px;background:var(--sf3);border:1px solid var(--bd);color:var(--tx2);font-weight:600}
+.pill.buy{background:var(--acd);color:var(--ac);border-color:rgba(0,229,160,.25)}
+.pill.sell{background:rgba(0,200,255,.1);color:var(--ac2);border-color:rgba(0,200,255,.25)}
+.pill.al{background:rgba(255,192,64,.1);color:var(--am);border-color:rgba(255,192,64,.25)}
+.pill.pp{background:var(--sf);color:var(--tx3)}
+.d-body{padding:6px 18px 14px}
+.d-h{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin:12px 0 4px}
+.line{padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12.5px;line-height:1.5}
+.line:last-child{border-bottom:none}
+/* 警报 feed */
+.alrt{display:flex;gap:10px;padding:11px 18px;border-bottom:1px solid var(--bd);font-size:12.5px;line-height:1.5}
+.alrt:last-child{border-bottom:none}
+.dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex:0 0 8px}
+.dot.red{background:var(--rd);box-shadow:0 0 6px var(--rd)}
+.dot.yellow{background:var(--am);box-shadow:0 0 6px var(--am)}
+.dot.gray{background:var(--tx3)}
+.toast{position:fixed;top:70px;right:20px;padding:12px 18px;border-radius:10px;font-size:12px;z-index:200;opacity:0;transform:translateY(-10px);transition:all .3s;max-width:360px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.ok{background:var(--acd);border:1px solid rgba(0,229,160,0.3);color:var(--ac)}
+.toast.err{background:var(--rdd);border:1px solid rgba(255,64,112,0.3);color:var(--rd)}
+/* 当前持仓「只看」面板 — 复刻老主页 #pos-panel-current 的 10 列布局 + 彩色 chip + 决策状态徽章 */
+#pos-panel-current .pos-hdr,#pos-panel-current .pos-row{display:grid;grid-template-columns:minmax(190px,2.4fr) 48px 62px 66px 66px 52px 82px 72px 90px 262px 70px;gap:5px;align-items:center;padding:13px 18px;border-bottom:1px solid var(--bd);font-size:12px}
+#pos-panel-current .pos-hdr{font-weight:700;color:var(--tx3);font-size:10px;background:var(--sf2);text-transform:uppercase;letter-spacing:.4px;position:sticky;top:0;z-index:1}
+#pos-panel-current .pos-row:hover{background:linear-gradient(90deg,rgba(0,200,255,0.05),transparent 80%)}
+#pos-panel-current .pos-row .nm{font-weight:600;white-space:normal;word-break:break-word;line-height:1.35;padding-right:6px;font-size:13.5px}
+#pos-panel-current .pos-row .mono{font-family:'JetBrains Mono';font-size:12px}
+#pos-panel-current .pos-row .cur-value{font-size:15px;font-weight:700}
+#pos-panel-current .pos-row .cur-pnl,#pos-panel-current .pos-row .cur-pnl-d{font-size:16.5px;font-weight:800}
+#pos-panel-current .vchip{font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;background:var(--sf);border:1px solid var(--bd);color:var(--tx2);white-space:nowrap}
+#pos-panel-current .vchip-q{background:rgba(0,200,255,0.14);color:#00c8ff;border-color:rgba(0,200,255,0.42)}
+#pos-panel-current .vchip-conf{background:rgba(255,192,64,0.14);color:#ffc040;border-color:rgba(255,192,64,0.42)}
+#pos-panel-current .vchip-convergent{background:rgba(0,229,160,0.14);color:#00e5a0;border-color:rgba(0,229,160,0.42)}
+#pos-panel-current .vchip-hybrid{background:rgba(255,192,64,0.14);color:#ffc040;border-color:rgba(255,192,64,0.42)}
+#pos-panel-current .vchip-event_driven{background:rgba(138,108,255,0.16);color:#a98cff;border-color:rgba(138,108,255,0.45)}
+.pos-off{font-size:10px;color:#ff4070;font-weight:700}
+.monitor-state-row{padding:9px 16px;display:flex;align-items:center;gap:6px;background:rgba(0,168,132,0.04);border-left:3px solid var(--ac);margin:6px 0 12px 18px;border-radius:4px;flex-wrap:wrap}
+.ms-label{font-size:12px;color:var(--tx3);font-weight:600}
+.ms-badge{font-family:'JetBrains Mono';font-size:13px;padding:4px 13px;border-radius:11px;font-weight:600;letter-spacing:.3px}
+.ms-HOLD{background:rgba(150,150,150,0.15);color:#9a9ac0}
+.ms-MARGINAL{background:rgba(255,180,0,0.12);color:#e0a800}
+.ms-SOFT_NEGATIVE{background:rgba(140,220,170,0.22);color:#5aba7a}
+.ms-AT_TARGET{background:rgba(0,229,160,0.2);color:#00d090;animation:reevalPulse 2s ease-in-out infinite}
+.ms-PENDING_REEVAL{background:rgba(255,160,0,0.18);color:#ffb020;animation:reevalPulse 1.5s ease-in-out infinite}
+.ms-TIME_STOP{background:rgba(180,80,0,0.15);color:#d07020}
+.ms-STOP_LOSS{background:rgba(180,0,0,0.22);color:#ff6060;font-weight:600}
+.ms-TAKE_PROFIT_PRICE,.ms-TAKE_PROFIT_PNL{background:rgba(0,200,140,0.25);color:#00d090;font-weight:600}
+.ms-PENDING,.ms-NO_META{background:rgba(120,120,120,0.10);color:#8888b0}
+@keyframes reevalPulse{0%,100%{opacity:1}50%{opacity:.55}}
+</style></head><body>
+<nav>
+<div class="logo">🤖</div>
+<div class="nt">全自动监控 <span id="ver"></span></div>
+<div class="pages-tab">
+<a class="ptab ptab-active" href="/">🏠 监控</a>
+<a class="ptab" href="/bench">🧪 Bench基准</a>
+<a class="ptab" href="/shadow">🟣 三号低价</a>
+<a class="ptab" href="/history">📊 往期仓位</a>
+<a class="ptab" href="/paper">🧪 测试仓</a>
+<a class="ptab" href="/m">📱 手机版</a>
+</div>
+<div class="dino-track" title="Chrome 离线小恐龙 — 恐龙家族躲仙人掌"><span class="ground"></span><span class="cactus c1">🌵</span><span class="cactus c2">🌵</span><span class="cactus c3">🌵</span><span class="dino d1">🦖</span><span class="dino d2">🦕</span><span class="dino d3">🦖</span></div>
+<div class="nr"><div class="lp"><div class="ld"></div>监控中 · 30s</div></div>
+</nav>
+<div class="wrap">
+
+<div class="ms">
+<div class="m g"><div class="mi">💰</div><div class="ml">总盈亏</div><div class="mv" id="m-pnl">—</div><div class="msb">所有持仓浮盈亏</div></div>
+<div class="m b"><div class="mi">📦</div><div class="ml">持仓数</div><div class="mv" id="m-cnt">—</div><div class="msb">活跃真仓</div></div>
+<div class="m v"><div class="mi">💵</div><div class="ml">现金</div><div class="mv" id="m-cash" style="color:var(--am)">—</div><div class="msb">可用余额</div></div>
+<div class="m b"><div class="mi">💼</div><div class="ml">总资产</div><div class="mv" id="m-assets" style="color:var(--ac2)">—</div><div class="msb">持仓市值 + 现金</div></div>
+</div>
+<div class="op-row">
+<button class="opbtn stop" onclick="emergencyStop()" title="紧急停止 monitor / 整个 bot (停了要去命令行 bash restart.sh 才恢复)">⏹ 应急停止</button>
+<span class="upd" id="upd"></span>
+</div>
+
+<div class="sl">📈 资产总值曲线</div>
+<div class="card" style="padding:18px">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:12px;flex-wrap:wrap">
+<div style="flex:1;min-width:220px">
+<div id="chart-delta" style="font-size:26px;font-weight:700;font-family:'JetBrains Mono';color:var(--ac2);letter-spacing:-.5px;line-height:1.1">$0.00</div>
+<div id="chart-delta-label" style="font-size:10px;color:var(--tx2);margin-top:3px">区间涨跌 = 末点资产 − 起点资产</div>
+</div>
+<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+<button class="range-btn" data-range="1d" onclick="loadChart('1d')">1D</button>
+<button class="range-btn active" data-range="1w" onclick="loadChart('1w')">1W</button>
+<button class="range-btn" data-range="1m" onclick="loadChart('1m')">1M</button>
+<button class="range-btn" data-range="1y" onclick="loadChart('1y')">1Y</button>
+<button class="range-btn" data-range="all" onclick="loadChart('all')">ALL</button>
+</div>
+</div>
+<div style="position:relative;height:280px"><canvas id="portfolio-canvas"></canvas></div>
+</div>
+
+<div class="sl">🌙 按天战报 <span class="cnt dimc">只显示当天 · 其余天收在「📁 往期战报」里</span></div>
+<div id="digest"><div class="empty">加载中…</div></div>
+
+<div class="sl">📦 当前持仓 <span class="cnt dimc" id="pos-cnt"></span></div>
+<div class="card"><div id="pos-panel-current" class="cb">
+<div class="pos-hdr"><span>名称</span><span>方向</span><span>距结算</span><span>入场价</span><span>当前价</span><span>份数</span><span>当前价值</span><span>盈亏%</span><span>盈亏$</span><span>q · 信心 · 止损</span><span>操作</span></div>
+<div id="holdings"><div class="empty">加载中…</div></div>
+</div></div>
+
+<div class="sl">🎯 事件中心</div>
+<div class="card" style="padding:18px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap">
+<div style="display:flex;gap:4px">
+<button class="range-btn active" data-mtab="realtime" onclick="switchMoverTab('realtime')">实时榜</button>
+<button class="range-btn" data-mtab="movers" onclick="switchMoverTab('movers')">涨跌榜</button>
+<button class="range-btn" data-mtab="value" onclick="switchMoverTab('value')">现值榜</button>
+</div>
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+<div id="realtime-range-group" style="display:flex;gap:4px">
+<button class="range-btn" data-rtrange="30m" onclick="loadRealtime('30m')">30m</button>
+<button class="range-btn active" data-rtrange="1h" onclick="loadRealtime('1h')">1h</button>
+<button class="range-btn" data-rtrange="6h" onclick="loadRealtime('6h')">6h</button>
+<button class="range-btn" data-rtrange="1d" onclick="loadRealtime('1d')">1d</button>
+</div>
+<div id="movers-range-group" style="display:none;gap:4px">
+<button class="range-btn active" data-mrange="1d" onclick="loadMovers('1d')">1D</button>
+<button class="range-btn" data-mrange="1w" onclick="loadMovers('1w')">1W</button>
+</div>
+<div id="metric-toggle-group" style="display:flex;gap:4px">
+<button class="range-btn active" data-metric="pp" onclick="setMetricMode('pp')" title="按百分点排序">pp</button>
+<button class="range-btn" data-metric="dollar" onclick="setMetricMode('dollar')" title="按美元盈亏排序">$</button>
+</div>
+<button class="range-btn" onclick="refreshMoverTab()" title="刷新最新数据 (绕过缓存)">↻</button>
+<button class="range-btn" id="mover-more-btn" onclick="toggleMoverExpanded()">More</button>
+</div>
+</div>
+<div id="realtime-section">
+<div style="font-size:11px;color:#ffc040;font-weight:700;letter-spacing:0.5px;margin-bottom:6px">⚡ 异动 <span id="realtime-suffix">Top 3</span></div>
+<div id="realtime-list" style="max-height:400px;overflow-y:auto"><div style="font-size:10px;color:var(--tx3);padding:8px 0">loading...</div></div>
+</div>
+<div id="movers-section" style="display:none">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+<div>
+<div style="font-size:11px;color:#00e5a0;font-weight:700;letter-spacing:0.5px;margin-bottom:6px">📈 涨幅 <span id="movers-g-suffix">Top 3</span></div>
+<div id="movers-gainers" style="max-height:400px;overflow-y:auto"><div style="font-size:10px;color:var(--tx3);padding:8px 0">loading...</div></div>
+</div>
+<div>
+<div style="font-size:11px;color:#ff4070;font-weight:700;letter-spacing:0.5px;margin-bottom:6px">📉 跌幅 <span id="movers-l-suffix">Top 3</span></div>
+<div id="movers-losers" style="max-height:400px;overflow-y:auto"><div style="font-size:10px;color:var(--tx3);padding:8px 0">loading...</div></div>
+</div>
+</div>
+</div>
+<div id="value-section" style="display:none">
+<div style="font-size:11px;color:#00c8ff;font-weight:700;letter-spacing:0.5px;margin-bottom:6px">💼 持仓现值 <span id="value-suffix">Top 3</span></div>
+<div id="value-list" style="max-height:400px;overflow-y:auto"><div style="font-size:10px;color:var(--tx3);padding:8px 0">loading...</div></div>
+</div>
+</div>
+
+<div class="sl">🔬 自动重评建议 <span class="cnt dimc" id="reeval-slot"></span> <span class="cnt dimc">只读 · 决策已全自动执行, 无需操作</span></div>
+<div class="card"><div class="cb" id="reeval" style="max-height:480px;padding:10px 12px;display:flex;flex-direction:column;gap:8px"><div class="empty">加载中…</div></div></div>
+
+<div class="grid2">
+<div>
+<div class="sl">🔎 GLM 选品运行状况</div>
+<div class="card"><div class="cb" id="discovery" style="max-height:380px"><div class="empty">加载中…</div></div></div>
+</div>
+<div>
+<div class="sl">📝 操作记录 <span class="cnt dimc">全部事件流</span></div>
+<div class="card"><div class="cb" id="events" style="max-height:380px"><div class="empty">加载中…</div></div></div>
+</div>
+</div>
+
+<div class="sl">🗂 未成交候选 <span class="cnt dimc">选了但按 40~85 没真买</span></div>
+<div class="card"><div class="cb" id="candidates" style="max-height:420px"><div class="empty">加载中…</div></div></div>
+
+</div>
+<div id="toast" class="toast"></div>
+<script>
+var CUR_RANGE='1w', portfolioChart=null;
+var RANGE_LABELS={'1d':'今日','1w':'近一周','1m':'近一月','1y':'近一年','all':'全部'};
+function esc(s){return (s==null?'':(''+s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function usd(n){n=+n||0;return (n<0?'-$':'$')+Math.abs(n).toFixed(2)}
+function pct(n){n=+n||0;return (n>=0?'+':'')+n.toFixed(1)+'%'}
+function col(n){return (+n>=0)?'g':'r'}
+function sideTag(s){s=(s||'').toUpperCase();return '<span class="side '+(s==='NO'?'NO':'YES')+'">'+(s||'?')+'</span>'}
+function toast(m,ok){var t=document.getElementById('toast');t.textContent=m;t.className='toast show '+(ok?'ok':'err');setTimeout(function(){t.className='toast'},2800)}
+
+async function loadAll(){
+  try{
+    var [hold,mon]=await Promise.all([
+      fetch('/api/auto/holdings').then(r=>r.json()).catch(function(){return {ok:false}}),
+      fetch('/api/auto/monitor').then(r=>r.json()).catch(function(){return {ok:false}})
+    ]);
+    renderMetrics(hold); renderHoldings(hold);
+    renderDigest(mon); renderReeval(mon); renderDiscovery(mon); renderCandidates(mon);
+    renderEvents(mon);
+    if(mon&&mon.version)document.getElementById('ver').textContent='v'+mon.version;
+    loadChart(CUR_RANGE);
+    document.getElementById('upd').textContent='刷新于 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  }catch(e){console.error(e)}
+}
+
+function renderMetrics(s){
+  if(!s||!s.ok)return;
+  var pnl=document.getElementById('m-pnl');
+  pnl.textContent=usd(s.total_pnl); pnl.style.color=(+s.total_pnl>=0)?'var(--ac)':'var(--rd)';
+  document.getElementById('m-cnt').textContent=s.position_count!=null?s.position_count:'—';
+  document.getElementById('m-cash').textContent=usd(s.cash);
+  document.getElementById('m-assets').textContent=usd(s.assets_total);
+}
+
+var CONF_CN={high:'高',medium:'中',low:'低'};
+var TIER_CN={convergent:'收敛-20%',hybrid:'混合-35%',event_driven:'事件$0.05'};
+var MS_CN={PENDING_REEVAL:'⏸ 等重评 · 暂不止损'};
+function renderHoldings(s){
+  var box=document.getElementById('holdings');
+  if(!s||!s.ok||!s.positions){box.innerHTML='<div class="empty">读取失败</div>';return}
+  document.getElementById('pos-cnt').textContent=s.positions.length+' 仓';
+  if(!s.positions.length){box.innerHTML='<div class="empty">暂无持仓</div>';return}
+  var h='';
+  s.positions.forEach(function(p){
+    var pd=+p.pnl_dollar||0, pp=+p.pnl_pct||0, gd=pd>=0, gp=pp>=0;
+    var pdc=gd?'#00e5a0':'#ff4070', ppc=gp?'#00e5a0':'#ff4070';
+    var off=p.autostop_disabled?' <span class="pos-off" title="该仓自动止损已取消, 只留 $0.05 地板兜底">🛑止损OFF</span>':'';
+    var days=(p.days_left==null)?'—':(p.days_left+'天');
+    var qc=(p.q!=null)?'<span class="vchip vchip-q">q '+Math.round(p.q*100)+'%</span>':'<span class="vchip" style="opacity:.45">q —</span>';
+    var cc=p.confidence?'<span class="vchip vchip-conf">信心'+(CONF_CN[p.confidence]||p.confidence)+'</span>':'';
+    var tc=p.stop_loss_tier?'<span class="vchip vchip-'+p.stop_loss_tier+'">'+(TIER_CN[p.stop_loss_tier]||p.stop_loss_tier)+'</span>':'';
+    var nm=esc((p.title||'').replace(/'/g,'')).slice(0,40);
+    h+='<div class="pos-row">'+
+      '<span class="nm">'+esc(p.title||p.asset)+off+'</span>'+
+      '<span class="mono" style="color:'+(p.side==='YES'?'#00a884':'#cc3050')+';font-weight:600">'+esc(p.side)+'</span>'+
+      '<span class="mono" style="color:var(--tx3)">'+days+'</span>'+
+      '<span class="mono" style="color:#8060ff">$'+(+p.avg_price).toFixed(3)+'</span>'+
+      '<span class="mono" style="color:#00c8ff">$'+(+p.cur_price).toFixed(3)+'</span>'+
+      '<span class="mono" style="color:#ffc040">'+(+p.size).toFixed(1)+'</span>'+
+      '<span class="mono cur-value" style="color:'+pdc+'">$'+(+p.value).toFixed(2)+'</span>'+
+      '<span class="mono cur-pnl" style="color:'+ppc+'">'+(gp?'+':'')+pp.toFixed(1)+'%</span>'+
+      '<span class="mono cur-pnl-d" style="color:'+pdc+'">'+(gd?'+$':'-$')+Math.abs(pd).toFixed(2)+'</span>'+
+      '<span style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">'+qc+cc+tc+'</span>'+
+      '<span style="text-align:right"><button class="clr" onclick="forceExit(\''+p.asset+'\',\''+nm+'\')">清仓</button></span>'+
+      '</div>';
+    if(p.monitor_state){
+      h+='<div class="monitor-state-row"><span class="ms-label">决策状态:</span><span class="ms-badge ms-'+esc(p.monitor_state)+'">'+esc(MS_CN[p.monitor_state]||p.monitor_state)+'</span></div>';
+    }
+  });
+  box.innerHTML=h;
+}
+
+function dayPills(d){
+  return '<span class="pill buy">买入 '+d.n_buy+' · '+usd(d.usd_buy)+'</span>'+
+         '<span class="pill sell">卖出 '+d.n_sell+'</span>'+
+         (d.n_alert?'<span class="pill al">🚨 '+d.n_alert+'</span>':'')+
+         (d.paper?'<span class="pill pp">🧪 测试仓 '+d.paper+'</span>':'');
+}
+function dayBody(d){
+  var body='';
+  if(d.buys.length){body+='<div class="d-h g">买入</div>';d.buys.forEach(function(b){
+    body+='<div class="line">'+esc(b.time)+' · '+sideTag(b.side)+' <b class="g">'+usd(b.usd)+'</b> · '+esc(b.title)+'<br><span class="subn">'+esc(b.note)+'</span></div>';});}
+  if(d.sells.length){body+='<div class="d-h b">卖出</div>';d.sells.forEach(function(s){
+    body+='<div class="line">'+esc(s.time)+' · <span class="b">'+esc(s.label)+'</span> · '+esc(s.title)+'<br><span class="subn">'+esc(s.detail)+'</span></div>';});}
+  if(d.alerts.length){body+='<div class="d-h a">警报</div>';d.alerts.forEach(function(a){
+    body+='<div class="line"><span class="'+(a.level==='red'?'r':a.level==='yellow'?'a':'dim')+'">'+(a.level==='red'?'🔴':a.level==='yellow'?'🟠':'⚪')+' '+esc(a.kind)+'</span> · '+esc(a.title)+'<br><span class="subn">'+esc(a.detail)+'</span></div>';});}
+  return body||'<div class="empty">这天没有真买 / 卖出 / 警报</div>';
+}
+function dayHtml(d,open){
+  return '<details class="day"'+(open?' open':'')+'><summary><span class="d-date">'+esc(d.date)+'</span><span class="d-wd">'+esc(d.weekday)+'</span>'+dayPills(d)+'</summary><div class="d-body">'+dayBody(d)+'</div></details>';
+}
+function renderDigest(m){
+  // 用户 2026-07-12 二次明确: 只显示"当天"一张卡; 其余所有天收进**一个**「📁 往期战报」折叠盒,
+  // 点开盒子 → 里面每一天又是各自的折叠, 再点才看到那天的明细。
+  var box=document.getElementById('digest');
+  if(!m||!m.days||!m.days.length){box.innerHTML='<div class="card"><div class="empty">还没有交易记录。每天 09:00 / 21:00 扫描选品后, 真买会记在这里。</div></div>';return}
+  var today=new Date().toLocaleDateString('sv-SE');
+  var todayH='',past=[],pBuys=0,pSells=0,pUsd=0,pAlerts=0;
+  m.days.forEach(function(d){
+    if(d.date===today){todayH=dayHtml(d,true);}
+    else{past.push(d);pBuys+=d.n_buy||0;pSells+=d.n_sell||0;pUsd+=(+d.usd_buy||0);pAlerts+=d.n_alert||0;}
+  });
+  if(!todayH)todayH='<div class="card"><div class="empty">今天 ('+esc(today)+') 还没有交易 / 警报记录</div></div>';
+  var h=todayH;
+  if(past.length){
+    var range=past[past.length-1].date.slice(5)+' ~ '+past[0].date.slice(5);
+    h+='<details class="day"><summary><span class="d-date">📁 往期战报</span><span class="d-wd">'+past.length+' 天 · '+esc(range)+'</span>'+
+       '<span class="pill buy">买入 '+pBuys+' · '+usd(pUsd)+'</span><span class="pill sell">卖出 '+pSells+'</span>'+
+       (pAlerts?'<span class="pill al">🚨 '+pAlerts+'</span>':'')+
+       '</summary><div class="d-body" style="padding-top:12px">'+past.map(function(d){return dayHtml(d,false)}).join('')+'</div></details>';
+  }
+  box.innerHTML=h;
+}
+
+/* ===== 自动重评建议 — 照抄老页卡片样式 (2026-07-12 用户: "学老版的", 折叠单行 + 更多▾ 展开;
+   只读版: 去掉 确认/忽略/清空 按钮 — 决策已全自动执行) ===== */
+var arOpen=new Set();
+function arToggle(id){
+  if(arOpen.has(id))arOpen.delete(id);else arOpen.add(id);
+  var op=arOpen.has(id),e=document.getElementById('ar-det-'+id),b=document.getElementById('ar-more-'+id);
+  if(e)e.style.display=op?'block':'none';
+  if(b)b.textContent=op?'收起 ▴':'更多 ▾';
+}
+function arProv(p){return p==='glm'?'<span style="color:#8a6cff;font-weight:600">智谱GLM</span>':p==='claude'?'<span style="color:#00c8ff;font-weight:600">Claude</span>':''}
+function arCard(inner,color){return '<div style="background:var(--bg);border:1px solid var(--bd);border-left:3px solid '+color+';border-radius:8px;padding:11px 13px">'+inner+'</div>'}
+function renderReeval(m){
+  var box=document.getElementById('reeval');
+  var slot=(m&&m.reeval&&m.reeval.last_slot)?m.reeval.last_slot:'—';
+  document.getElementById('reeval-slot').textContent='上次巡检 '+slot;
+  var rows=(m&&m.reeval&&m.reeval.recent)||[];
+  if(!rows.length){box.innerHTML='<div class="empty">暂无重评记录。每天 15:00 全仓巡检 + 大跌 / 反向推荐触发会记在这。</div>';return}
+  box.innerHTML=rows.map(function(r){
+    var name=esc(r.title||'');
+    var loss=Math.round((r.loss_pct||0)*100);
+    if(r.status==='analyzing')
+      return arCard('🔬 <b>'+name+'</b> — 联网调研中…（亏 '+loss+'%）','#00c8ff');
+    var ac=r.action||'-';
+    var actLabel=ac==='exit'?'🔴 清仓 (exit)':ac==='update_q'?('🟡 更新 q → '+Math.round((r.new_q||0)*100)+'%'):ac==='cancel_autostop'?'🛑 取消自动止损':ac==='hold'?'🟢 继续持有 (hold)':'—';
+    var statusTag=r.status==='executed'?'<span style="color:#00e5a0;font-size:11px">✓ 已自动执行</span>'
+      :r.status==='error'?'<span style="color:#ff4070;font-size:11px">✗ 失败/放弃</span>'
+      :r.status==='cleared'?'<span style="color:var(--tx3);font-size:11px">已归档</span>'
+      :'<span style="color:#ffc040;font-size:11px">'+esc(r.status)+'</span>';
+    var border=ac==='exit'?'#ff4070':r.status==='error'?'#ff4070':ac==='update_q'?'#ffc040':ac==='cancel_autostop'?'#8060ff':'var(--bd)';
+    var tb=r.thesis_broken?'<span style="color:#ff4070">⚠️ 论点被推翻</span>':'<span style="color:var(--tx3)">论点未破</span>';
+    var qs=(r.orig_q!=null&&r.new_q!=null)?(' · q '+Math.round(r.orig_q*100)+'%→'+Math.round(r.new_q*100)+'%'):'';
+    var src=(r.sources||[]).map(function(u){return '<a href="'+esc(u)+'" target="_blank" style="color:var(--ac)">来源</a>'}).join(' · ');
+    var det='<div id="ar-det-'+r.id+'" style="display:'+(arOpen.has(r.id)?'block':'none')+';margin-top:6px;border-top:1px solid var(--bd);padding-top:6px">'
+      +'<div style="font-size:11px;color:var(--tx3);margin-bottom:4px">'+(r.trigger?('⚡ '+esc(r.trigger)+' · '):'')+'亏 '+loss+'%'+qs+' · 信心 '+esc(r.confidence||'?')+' · '+esc((r.date||'').slice(5))+' '+esc(r.time)+' · '+tb+(r.provider?' · 由 '+arProv(r.provider)+' 决策':'')+'</div>'
+      +(r.error?'<div style="font-size:12px;color:#ff4070;margin-bottom:4px">'+esc(r.error)+'</div>':'')
+      +'<div style="font-size:12px;color:var(--tx2);margin-bottom:4px">'+esc(r.reason||'')+'</div>'
+      +(r.headline?'<div style="font-size:11px;color:var(--tx3)">📰 '+esc(r.headline)+(src?' · '+src:'')+'</div>':(src?'<div style="font-size:11px">'+src+'</div>':''))
+      +'</div>';
+    return arCard('<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">'
+      +'<span style="font-weight:600">'+name+'</span> '+(r.side?sideTag(r.side):'')+' '+statusTag
+      +' <span style="font-size:13px">'+actLabel+'</span>'
+      +'<button id="ar-more-'+r.id+'" class="range-btn" style="margin-left:auto" onclick="arToggle('+r.id+')">'+(arOpen.has(r.id)?'收起 ▴':'更多 ▾')+'</button>'
+      +'</div>'+det, border);
+  }).join('');
+}
+
+/* ===== 操作记录 (老页 📝 搬入, 只读) ===== */
+var EV_STYLE={auto_sell:['b','自动卖出'],user_sell:['vi','手动卖出'],auto_buy:['g','自动买入'],user_buy:['g','手动买入'],paper_add:['a','进测试仓'],no_meta_alert:['r','🔴无档案警'],blacklist_paper:['a','黑名单→测试仓']};
+function renderEvents(m){
+  var box=document.getElementById('events');var rows=(m&&m.events)||[];
+  if(!rows.length){box.innerHTML='<div class="empty">暂无记录</div>';return}
+  var h='';
+  rows.slice(0,100).forEach(function(e){
+    var s=EV_STYLE[e.type]||['dim',e.type];
+    h+='<div class="line" style="padding:8px 18px"><span class="subn mono">'+esc((e.date||'').slice(5))+' '+esc(e.time)+'</span> · <b class="'+s[0]+'">'+esc(s[1])+'</b> · '+esc(e.title)+(e.detail?'<br><span class="subn">'+esc(e.detail)+'</span>':'')+'</div>';
+  });
+  box.innerHTML=h;
+}
+
+/* ===== 事件中心 — 老页 JS 原样移植 (2026-07-12 用户: "保持原样"): Top3/More · pp/$ · ↻强刷 · 5分钟自刷新 ===== */
+let moverTab='realtime';let moverRange='1d';let realtimeRange='1h';let moverExpanded=false;let metricMode='pp';let lastMovers=null;let lastValueRank=null;let lastRealtime=null;
+function switchMoverTab(tab){
+  moverTab=tab;
+  document.querySelectorAll('.range-btn[data-mtab]').forEach(b=>b.classList.toggle('active',b.dataset.mtab===tab));
+  document.getElementById('realtime-section').style.display=tab==='realtime'?'':'none';
+  document.getElementById('movers-section').style.display=tab==='movers'?'':'none';
+  document.getElementById('value-section').style.display=tab==='value'?'':'none';
+  document.getElementById('realtime-range-group').style.display=tab==='realtime'?'flex':'none';
+  document.getElementById('movers-range-group').style.display=tab==='movers'?'flex':'none';
+  document.getElementById('metric-toggle-group').style.display=tab==='value'?'none':'flex';
+  if(tab==='realtime')loadRealtime(realtimeRange);
+  else if(tab==='value')loadValueRank();
+  else loadMovers(moverRange);
+}
+function setMetricMode(m){
+  metricMode=m;
+  document.querySelectorAll('.range-btn[data-metric]').forEach(b=>b.classList.toggle('active',b.dataset.metric===m));
+  if(moverTab==='realtime'&&lastRealtime)renderRealtimeInto(lastRealtime);
+  else if(moverTab==='movers'&&lastMovers)renderMoversInto(lastMovers);
+}
+function toggleMoverExpanded(){
+  moverExpanded=!moverExpanded;
+  document.getElementById('mover-more-btn').textContent=moverExpanded?'Less':'More';
+  if(moverTab==='realtime'&&lastRealtime)renderRealtimeInto(lastRealtime);
+  else if(moverTab==='movers'&&lastMovers)renderMoversInto(lastMovers);
+  else if(moverTab==='value'&&lastValueRank)renderValueInto(lastValueRank);
+}
+function refreshMoverTab(){
+  if(moverTab==='realtime')loadRealtime(realtimeRange,true);
+  else if(moverTab==='movers')loadMovers(moverRange,true);
+  else loadValueRank(true);
+}
+async function loadRealtime(range,force){
+  realtimeRange=range;
+  document.querySelectorAll('.range-btn[data-rtrange]').forEach(b=>b.classList.toggle('active',b.dataset.rtrange===range));
+  const el=document.getElementById('realtime-list');
+  if(el)el.innerHTML='<div style="font-size:10px;color:var(--tx3);padding:8px 0">loading...</div>';
+  try{
+    const r=await fetch('/api/realtime_movers?range='+range+(force?'&force=1':''));
+    const d=await r.json();
+    if(!d.ok)return;
+    lastRealtime=d;
+    renderRealtimeInto(d);
+  }catch(e){console.error('realtime load failed',e)}
+}
+function renderRealtimeInto(d){
+  let items=(d.items||[]).slice();
+  if(metricMode==='dollar')items.sort((a,b)=>Math.abs(b.change_dollar||0)-Math.abs(a.change_dollar||0));
+  const show=moverExpanded?items:items.slice(0,3);
+  document.getElementById('realtime-suffix').textContent=moverExpanded?'(全部 '+items.length+')':'Top 3';
+  const el=document.getElementById('realtime-list');
+  if(!el)return;
+  if(show.length===0){el.innerHTML='<div style="font-size:10px;color:var(--tx3);padding:8px 0">暂无数据 (该时间窗口内未发生显著变化)</div>';return}
+  el.innerHTML=show.map((m,i)=>{
+    const color=m.change_pp>=0?'#00e5a0':'#ff4070';
+    const sign=m.change_pp>=0?'+':'';
+    const title=(m.title||'').replace(/"/g,'&quot;');
+    const primary=metricMode==='dollar'?`${sign}$${Math.abs(m.change_dollar||0).toFixed(2)}`:`${sign}${m.change_pp.toFixed(1)}pp`;
+    return `<div style="padding:8px 0;border-bottom:1px solid rgba(30,30,74,0.4);font-size:11px">
+<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:3px">
+<div style="font-weight:500;color:var(--tx);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35;flex:1" title="${title}">${i+1}. ${title}</div>
+<div style="font-family:'JetBrains Mono';font-weight:700;color:${color};font-size:12px;white-space:nowrap">${primary}</div>
+</div>
+<div style="display:flex;gap:10px;font-family:'JetBrains Mono';font-size:10px;color:var(--tx3);flex-wrap:wrap">
+<span>${m.side}</span>
+<span style="color:${color}">(${sign}${m.change_pct.toFixed(1)}%)</span>
+<span>${(m.first_price*100).toFixed(1)}% → ${(m.last_price*100).toFixed(1)}%</span>
+</div>
+</div>`;
+  }).join('');
+}
+async function loadMovers(range,force){
+  moverRange=range;
+  document.querySelectorAll('.range-btn[data-mrange]').forEach(b=>b.classList.toggle('active',b.dataset.mrange===range));
+  const gEl=document.getElementById('movers-gainers');
+  const lEl=document.getElementById('movers-losers');
+  if(gEl)gEl.innerHTML='<div style="font-size:10px;color:var(--tx3);padding:8px 0">loading...</div>';
+  if(lEl)lEl.innerHTML='<div style="font-size:10px;color:var(--tx3);padding:8px 0">loading...</div>';
+  try{
+    const r=await fetch('/api/movers?range='+range+(force?'&force=1':''));
+    const d=await r.json();
+    if(!d.ok)return;
+    lastMovers=d;
+    renderMoversInto(d);
+  }catch(e){console.error('movers load failed',e)}
+}
+async function loadValueRank(force){
+  const el=document.getElementById('value-list');
+  if(el)el.innerHTML='<div style="font-size:10px;color:var(--tx3);padding:8px 0">loading...</div>';
+  try{
+    const r=await fetch('/api/holdings_rank'+(force?'?force=1':''));
+    const d=await r.json();
+    if(!d.ok)return;
+    lastValueRank=d;
+    renderValueInto(d);
+  }catch(e){console.error('value rank load failed',e)}
+}
+function renderMoversInto(d){
+  let gAll,lAll;
+  if(metricMode==='dollar'){
+    const all=[...(d.gainers||[]),...(d.losers||[])];
+    gAll=all.filter(m=>m.change_dollar>0).sort((a,b)=>b.change_dollar-a.change_dollar);
+    lAll=all.filter(m=>m.change_dollar<0).sort((a,b)=>a.change_dollar-b.change_dollar);
+  }else{
+    gAll=d.gainers||[];lAll=d.losers||[];
+  }
+  const gainers=moverExpanded?gAll:gAll.slice(0,3);
+  const losers=moverExpanded?lAll:lAll.slice(0,3);
+  document.getElementById('movers-g-suffix').textContent=moverExpanded?'(全部 '+gAll.length+')':'Top 3';
+  document.getElementById('movers-l-suffix').textContent=moverExpanded?'(全部 '+lAll.length+')':'Top 3';
+  const gEl=document.getElementById('movers-gainers');
+  const lEl=document.getElementById('movers-losers');
+  if(gEl)gEl.innerHTML=renderMoverList(gainers);
+  if(lEl)lEl.innerHTML=renderMoverList(losers);
+}
+function renderValueInto(d){
+  const items=d.items||[];
+  const show=moverExpanded?items:items.slice(0,3);
+  document.getElementById('value-suffix').textContent=moverExpanded?'(全部 '+items.length+')':'Top 3';
+  const el=document.getElementById('value-list');
+  if(!el)return;
+  if(show.length===0){el.innerHTML='<div style="font-size:10px;color:var(--tx3);padding:8px 0">暂无</div>';return}
+  el.innerHTML=show.map((m,i)=>{
+    const pnlColor=m.pnl_dollar>=0?'#00e5a0':'#ff4070';
+    const pnlSign=m.pnl_dollar>=0?'+':'';
+    const title=(m.title||'').replace(/"/g,'&quot;');
+    return `<div style="padding:9px 0;border-bottom:1px solid rgba(30,30,74,0.4);font-size:11px">
+<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:4px">
+<div style="font-weight:500;color:var(--tx);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35;flex:1" title="${title}">${i+1}. ${title}</div>
+<div style="font-family:'JetBrains Mono';font-weight:700;color:#00c8ff;font-size:12px;white-space:nowrap">$${m.value.toFixed(2)}</div>
+</div>
+<div style="display:flex;gap:10px;font-family:'JetBrains Mono';font-size:10px;color:var(--tx3);flex-wrap:wrap">
+<span>${m.side}</span>
+<span>${(m.cur_price*100).toFixed(1)}% × ${m.size.toFixed(1)}股</span>
+<span style="color:${pnlColor}">${pnlSign}$${Math.abs(m.pnl_dollar).toFixed(2)}</span>
+</div>
+</div>`;
+  }).join('');
+}
+function renderMoverList(items){
+  if(!items||items.length===0)return '<div style="font-size:10px;color:var(--tx3);padding:8px 0">暂无</div>';
+  return items.map((m,i)=>{
+    const color=m.change_pp>=0?'#00e5a0':'#ff4070';
+    const sign=m.change_pp>=0?'+':'';
+    const title=(m.title||'').replace(/"/g,'&quot;');
+    const primary=metricMode==='dollar'?`${sign}$${Math.abs(m.change_dollar||0).toFixed(2)}`:`${sign}${m.change_pp.toFixed(1)}pp`;
+    return `<div style="padding:8px 0;border-bottom:1px solid rgba(30,30,74,0.4);font-size:11px">
+<div style="font-weight:500;color:var(--tx);margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35" title="${title}">${i+1}. ${title}</div>
+<div style="display:flex;gap:10px;font-family:'JetBrains Mono';font-size:10px;flex-wrap:wrap">
+<span style="color:${color};font-weight:700">${primary}</span>
+<span style="color:${color}">(${sign}${m.change_pct.toFixed(1)}%)</span>
+<span style="color:var(--tx3)">${(m.first_price*100).toFixed(1)}% → ${(m.last_price*100).toFixed(1)}%</span>
+</div>
+</div>`;
+  }).join('');
+}
+window.addEventListener('load',()=>loadRealtime('1h'));
+setInterval(()=>{if(moverTab==='realtime')loadRealtime(realtimeRange);else if(moverTab==='movers')loadMovers(moverRange);else loadValueRank()},300000);
+
+function renderDiscovery(m){
+  var box=document.getElementById('discovery');
+  var rows=(m&&m.discovery_runs)||[];
+  if(!rows.length){box.innerHTML='<div class="empty">暂无选品运行。扫描完自动跑, 结果记这。</div>';return}
+  var h='<table><thead><tr><th>轮次</th><th>标签</th><th>推荐</th><th>tokens</th><th>错误</th></tr></thead><tbody>';
+  rows.forEach(function(r){
+    h+='<tr><td class="dim mono">'+esc(r.slot)+'</td><td>'+esc(r.tag)+'</td><td class="mono">'+(r.n_recs||0)+(r.n_invalid?' <span class="r">('+r.n_invalid+'坏)</span>':'')+'</td><td class="dim mono">'+esc(r.tokens)+'</td><td class="r subn">'+esc(r.error)+'</td></tr>';
+  });
+  box.innerHTML=h+'</tbody></table>';
+}
+
+function renderCandidates(m){
+  var box=document.getElementById('candidates');
+  var rows=(m&&m.candidates_pending)||[];
+  if(!rows.length){box.innerHTML='<div class="empty">暂无未成交候选。</div>';return}
+  var h='<table><thead><tr><th>时间</th><th>市场</th><th>方向</th><th>现价</th><th>去向 / 状态</th></tr></thead><tbody>';
+  rows.slice(0,40).forEach(function(c){
+    var rc=(c.route==='real')?'route-real':'route-paper',badge=(c.route==='real')?'🟢 真买路':'🧪 测试仓';
+    h+='<tr><td class="dim mono">'+esc(c.time)+'</td><td>'+esc(c.title)+' <span class="subn">'+esc(c.tag||'')+'</span></td><td>'+sideTag(c.side)+'</td><td class="mono">'+(c.cur_price!=null?('$'+(+c.cur_price).toFixed(3)):'—')+'</td><td><span class="'+rc+'">'+badge+'</span> <span class="subn">'+esc(c.status)+'</span></td></tr>';
+  });
+  box.innerHTML=h+'</tbody></table>';
+}
+
+/* ===== 资产曲线 (Chart.js, 照抄老 dashboard 的做法) ===== */
+var CHART_NOTE='';
+function setChartDelta(idx){
+  var dEl=document.getElementById('chart-delta'),lEl=document.getElementById('chart-delta-label');
+  var pts=portfolioChart?portfolioChart.data.datasets[0].data:[];
+  if(!pts||!pts.length){dEl.textContent='$0.00';dEl.style.color='var(--tx3)';lEl.textContent=RANGE_LABELS[CUR_RANGE]||'';return}
+  var t=(idx==null)?pts.length-1:idx,delta=pts[t].y-pts[0].y;
+  dEl.textContent=(delta>=0?'+$':'-$')+Math.abs(delta).toFixed(2);
+  dEl.style.color=delta>=0?'var(--ac)':'var(--rd)';
+  lEl.textContent=(RANGE_LABELS[CUR_RANGE]||'')+' · 起 '+usd(pts[0].y)+' → 现 '+usd(pts[t].y)+(CHART_NOTE?' · '+CHART_NOTE:'');
+}
+async function loadChart(range){
+  CUR_RANGE=range;
+  document.querySelectorAll('.range-btn[data-range]').forEach(function(b){b.classList.toggle('active',b.dataset.range===range)});
+  try{
+    // 2026-07-16 用户: 入金把曲线搞断 → 改用出入金校正接口 (预热点裁剪也在服务端做了)
+    var d=await fetch('/api/auto/portfolio_history?range='+range).then(r=>r.json());
+    if(!d.ok)return;
+    var pts=d.points||[];
+    CHART_NOTE=d.note||'';
+    var valuePts=pts.map(function(p){return {x:p.ts*1000,y:p.assets_total}});
+    var costPts=pts.map(function(p){return {x:p.ts*1000,y:(p.cost_line!=null)?p.cost_line:null}});
+    if(portfolioChart){portfolioChart.data.datasets[0].data=valuePts;portfolioChart.data.datasets[1].data=costPts;portfolioChart.update('none');setChartDelta(null);return}
+    if(typeof Chart==='undefined'){document.getElementById('chart-delta-label').textContent='(Chart.js 未加载, 检查网络)';return}
+    var ctx=document.getElementById('portfolio-canvas').getContext('2d');
+    var gP=ctx.createLinearGradient(0,0,0,280);gP.addColorStop(0,'rgba(0,229,160,0.34)');gP.addColorStop(1,'rgba(0,229,160,0.02)');
+    var gL=ctx.createLinearGradient(0,0,0,280);gL.addColorStop(0,'rgba(255,64,112,0.03)');gL.addColorStop(1,'rgba(255,64,112,0.30)');
+    portfolioChart=new Chart(ctx,{type:'line',data:{datasets:[
+      {label:'资产总值',data:valuePts,borderColor:'#22d3ee',fill:{target:1,above:gP,below:gL},tension:0.35,pointRadius:0,pointHoverRadius:5,borderWidth:2.5},
+      {label:'成本线',data:costPts,borderColor:'rgba(150,150,190,0.55)',borderDash:[5,4],borderWidth:1.3,fill:false,tension:0.35,pointRadius:0,pointHoverRadius:0}
+    ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      onHover:function(e,active){var v=active.find(function(a){return a.datasetIndex===0});setChartDelta(v?v.index:null)},
+      plugins:{legend:{display:true,labels:{color:'#8888c0',font:{size:10},usePointStyle:true,boxWidth:8,padding:12}},
+        tooltip:{backgroundColor:'rgba(17,17,40,0.95)',borderColor:'#1e1e4a',borderWidth:1,titleColor:'#e8e8ff',bodyColor:'#cfeef8',padding:10,filter:function(i){return i.parsed.y!=null},
+          callbacks:{title:function(items){return new Date(items[0].parsed.x).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})},
+            label:function(item){return (item.datasetIndex===0?'资产总值: ':'成本线: ')+'$'+item.parsed.y.toFixed(2)}}}},
+      scales:{x:{type:'time',ticks:{color:'#5858a0',font:{size:10},maxRotation:0,autoSkipPadding:20},grid:{color:'rgba(255,255,255,0.04)'}},
+        y:{ticks:{color:'#5858a0',font:{size:10},callback:function(v){return '$'+v.toFixed(0)}},grid:{color:'rgba(255,255,255,0.04)'}}}}});
+    document.getElementById('portfolio-canvas').addEventListener('mouseleave',function(){setChartDelta(null)});
+    setChartDelta(null);
+  }catch(e){console.error('chart load failed',e)}
+}
+
+async function forceExit(token,title){
+  if(!confirm('确定一键清仓「'+title+'」?\n这会真实市价卖出该持仓。'))return;
+  toast('清仓中…',true);
+  try{
+    var r=await fetch('/api/force_exit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token_id:token,reason:'手动清仓(监控页)'})}).then(x=>x.json());
+    toast(r.ok?('✅ '+(r.message||'已清仓')):('❌ '+(r.message||'失败')),r.ok);
+    setTimeout(loadAll,1500);
+  }catch(e){toast('❌ 请求失败',false)}
+}
+async function emergencyStop(){
+  if(!confirm('确定紧急停止 monitor / 整个 bot?\n\n停止后自动化全下线, 要去命令行 bash restart.sh 才能恢复。'))return;
+  toast('发送停止…',true);
+  try{
+    var r=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'stop'})}).then(x=>x.json());
+    toast(r.ok?'🛑 已发送停止, 监控即将下线':('❌ '+(r.message||'失败')),r.ok);
+  }catch(e){toast('🛑 已发送 (连接已断=正常)',true)}
+}
+
+loadAll();
+setInterval(loadAll,30000);
+</script></body></html>"""

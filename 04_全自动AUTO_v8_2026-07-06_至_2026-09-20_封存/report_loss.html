@@ -1,0 +1,317 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>report_loss.html</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root{
+  --ink:#141a26; --ink2:#41506b; --dim:#7c89a0; --line:#e5e9f2; --line2:#eef1f7;
+  --bg:#f6f8fc; --card:#ffffff;
+  --pos:#0e8a5f; --posbg:#e7f6ef; --neg:#d13b3b; --negbg:#fdecec; --zero:#8a94a8;
+  --brand:#26356b; --brand2:#3f8bd6;
+  --ev:#b7791f; --evbg:#fbf3e2; --hy:#2f6fb0; --hybg:#e8f1fa; --co:#7a4fc0; --cobg:#f0e9fb;
+}
+html{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+body{ font-family:-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  color:var(--ink); background:var(--bg); font-size:11px; line-height:1.5;
+  width:820px; margin:0 auto; padding:0 26px 40px; }
+
+/* cover */
+.cover{ padding:26px 0 8px; }
+.eyebrow{ font-size:10px; letter-spacing:.18em; color:var(--brand2); font-weight:700; }
+.cover h1{ font-size:30px; font-weight:800; letter-spacing:-.5px; color:var(--brand);
+  margin:4px 0 6px; }
+.cover .sub{ color:var(--ink2); font-size:11px; }
+.cover .sub b{ color:var(--ink); }
+.kpis{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-top:16px; }
+.kpi{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 13px;
+  box-shadow:0 1px 2px rgba(20,26,38,.04); }
+.kl{ font-size:10px; color:var(--dim); font-weight:600; }
+.kv{ font-size:20px; font-weight:800; letter-spacing:-.5px; margin:3px 0 5px; color:var(--ink); }
+.kv.pos{ color:var(--pos); } .kv.neg{ color:var(--neg); } .kv.zero{ color:var(--ink); }
+.chip{ display:inline-block; font-size:9px; font-weight:700; padding:2px 6px; border-radius:20px; }
+.chip em{ font-style:normal; opacity:.6; font-weight:600; }
+.chip.pos{ background:var(--posbg); color:var(--pos); }
+.chip.neg{ background:var(--negbg); color:var(--neg); }
+.chip.zero{ background:#eef1f7; color:var(--zero); }
+
+/* callout */
+.callout{ background:linear-gradient(180deg,#fff, #fbfcff); border:1.5px solid #d9e2f2;
+  border-radius:14px; padding:16px 18px; margin:18px 0; box-shadow:0 2px 10px rgba(38,53,107,.06); }
+.co-h{ font-size:15px; font-weight:800; color:var(--brand); margin-bottom:7px; }
+.pin{ margin-right:4px; }
+.callout p{ color:var(--ink2); margin-bottom:11px; }
+.callout b{ color:var(--ink); }
+.ba{ width:100%; border-collapse:collapse; font-size:10px; margin-bottom:12px; }
+.ba th{ background:#eef2fa; color:var(--ink2); text-align:left; padding:6px 8px; font-weight:700;
+  border:1px solid var(--line); }
+.ba td{ padding:6px 8px; border:1px solid var(--line); vertical-align:top; }
+.ba td.fx{ background:#f0f9f3; }
+.ba td.fx b{ color:var(--pos); }
+.tag{ display:inline-block; background:var(--negbg); color:var(--neg); font-size:8px; font-weight:800;
+  padding:1px 5px; border-radius:4px; margin-left:5px; vertical-align:middle; }
+.proof{ border:1.5px dashed #cdd8ee; border-radius:11px; padding:11px 13px; background:#fafcff; }
+.pf-t{ font-weight:800; color:var(--brand); font-size:12px; margin-bottom:8px; }
+.pf-b{ display:flex; align-items:stretch; gap:10px; }
+.pf-col{ flex:1; border-radius:9px; padding:9px 11px; }
+.pf-col .h{ font-size:10px; font-weight:800; margin-bottom:3px; }
+.pf-col .b{ font-size:10px; color:var(--ink2); }
+.pf-col.old{ background:#fbeeee; } .pf-col.old .h{ color:var(--neg); }
+.pf-col.new{ background:#e7f6ef; } .pf-col.new .h{ color:var(--pos); }
+.pf-col b{ color:var(--ink); }
+.arr{ align-self:center; font-size:20px; color:var(--brand2); font-weight:800; }
+
+/* sections */
+section{ margin:20px 0; }
+h2{ font-size:15px; font-weight:800; color:var(--ink); margin-bottom:9px;
+  display:flex; align-items:center; gap:9px; }
+h2 .n{ display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px;
+  background:var(--brand); color:#fff; border-radius:7px; font-size:12px; font-weight:800; }
+h2 em{ font-style:normal; font-size:11px; font-weight:600; color:var(--dim); }
+h2 em b{ color:var(--ink2); } .hl{ color:var(--brand2)!important; }
+
+/* tables */
+table.grid{ width:100%; border-collapse:collapse; font-size:10px; background:var(--card);
+  border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+table.grid th{ background:#f3f6fc; color:var(--ink2); font-weight:700; text-align:right;
+  padding:7px 9px; border-bottom:1px solid var(--line); white-space:nowrap; }
+table.grid th:first-child, table.grid td:first-child{ text-align:left; }
+table.grid td{ padding:6px 9px; border-bottom:1px solid var(--line2); text-align:right; white-space:nowrap; }
+table.grid tr:last-child td{ border-bottom:none; }
+table.grid tbody tr:nth-child(even){ background:#fafbfe; }
+table.closed td{ padding-top:3.8px; padding-bottom:3.8px; font-size:9.5px; }
+table.closed th{ padding-top:5px; padding-bottom:5px; }
+td.lbl{ text-align:left; font-weight:600; color:var(--ink); max-width:210px; overflow:hidden;
+  text-overflow:ellipsis; }
+td.num{ font-variant-numeric:tabular-nums; font-feature-settings:"tnum"; }
+td.dim{ color:var(--dim); } td.strong{ font-weight:800; }
+td.st,.st{ font-size:8.5px; color:var(--dim); font-weight:700; letter-spacing:.02em; text-align:right; }
+.pos{ color:var(--pos); } .neg{ color:var(--neg); } .zero{ color:var(--zero); }
+.ek{ font-weight:700; text-align:center!important; font-size:9px; }
+.ek-止盈{ color:var(--pos); } .ek-止损{ color:var(--neg); }
+.ek-重评exit{ color:var(--hy); } .ek-手动\/强平{ color:var(--dim); }
+
+/* badges */
+.badge{ display:inline-block; font-size:8.5px; font-weight:800; padding:1.5px 6px; border-radius:5px; }
+.b-ev{ background:var(--evbg); color:var(--ev); } .b-hy{ background:var(--hybg); color:var(--hy); }
+.b-co{ background:var(--cobg); color:var(--co); } .b-un{ background:#eef1f7; color:var(--dim); }
+
+.sumline{ text-align:right; font-size:11px; color:var(--ink2); margin-top:7px; padding-right:4px; }
+.sumline b{ font-weight:800; }
+
+/* tier note */
+.tiers-note{ margin-top:11px; background:var(--card); border:1px solid var(--line); border-radius:10px;
+  padding:11px 14px; }
+.tnh{ font-weight:700; margin-bottom:6px; color:var(--ink); font-size:10.5px; }
+.tiers-note ul{ list-style:none; }
+.tiers-note li{ font-size:10px; color:var(--ink2); padding:3px 0; }
+.tiers-note b{ color:var(--ink); }
+
+/* two-col cards */
+.two{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.card{ background:var(--card); border:1px solid var(--line); border-radius:11px; padding:13px 15px; }
+.ch{ font-weight:800; font-size:11px; color:var(--ink); margin-bottom:9px; }
+.mini{ font-size:9.5px; color:var(--ink2); margin-top:8px; line-height:1.55; }
+.mini b{ color:var(--ink); }
+.mini.danger{ background:#fff8f0; border:1px solid #f6e1c8; border-radius:8px; padding:8px 11px; color:#8a5a1a; }
+.mini.danger b{ color:#7a3d0a; }
+
+/* tier bars */
+.tier-row{ display:grid; grid-template-columns:52px 1fr 58px 92px; align-items:center; gap:8px;
+  padding:5px 0; font-size:10px; }
+.tn{ font-weight:700; color:var(--ink); }
+.tmid{ position:relative; height:14px; background:linear-gradient(90deg,transparent 49.6%,#d7deec 49.6%,#d7deec 50.4%,transparent 50.4%); border-radius:3px; }
+.tbar{ position:absolute; top:2px; height:10px; border-radius:3px; }
+.tbar.pos{ left:50%; background:var(--pos); } .tbar.neg{ right:50%; background:var(--neg); }
+.tv{ text-align:right; font-weight:800; font-variant-numeric:tabular-nums; }
+.tc{ text-align:right; color:var(--dim); font-size:9px; }
+
+/* exit-kind bars */
+.ekbars{ display:flex; flex-direction:column; gap:5px; }
+.ekrow{ display:grid; grid-template-columns:1fr 62px 42px; align-items:center; font-size:10px; }
+.ekn{ font-weight:700; color:var(--ink); }
+.ekc{ text-align:right; font-weight:800; font-variant-numeric:tabular-nums; }
+.ekq{ text-align:right; color:var(--dim); font-size:9px; }
+
+.worst{ margin-top:12px; }
+.mini-t{ font-size:9.5px; }
+.mini-t td.why,.why{ text-align:left; font-size:9px; color:var(--ink2); }
+.mini-t th:last-child{ text-align:left; }
+
+/* stat blocks */
+.stat{ background:var(--card); border:1px solid var(--line); border-radius:11px; padding:14px 16px; }
+.stat .big{ font-size:30px; font-weight:800; color:var(--brand); letter-spacing:-1px; }
+.stat .big.neg{ color:var(--neg); }
+.stat .big .s{ font-size:14px; font-weight:700; color:var(--dim); }
+.stat .cap{ font-size:10px; color:var(--ink2); margin-top:5px; }
+.stat .cap b{ color:var(--ink); }
+
+/* recommendations */
+.rec{ border-radius:11px; padding:12px 16px; margin-bottom:11px; }
+.rec.done{ background:#eef8f2; border:1px solid #cfeadd; }
+.rec.todo{ background:#f4f7fc; border:1px solid var(--line); }
+.rh{ font-weight:800; font-size:11.5px; margin-bottom:6px; }
+.rec.done .rh{ color:var(--pos); } .rec.todo .rh{ color:var(--brand); }
+.rec ul{ margin-left:16px; }
+.rec li{ font-size:10px; color:var(--ink2); padding:2.5px 0; }
+.rec b{ color:var(--ink); }
+
+footer{ margin-top:26px; padding-top:12px; border-top:1px solid var(--line); font-size:9px;
+  color:var(--dim); line-height:1.6; }
+footer code{ background:#eef1f7; padding:1px 4px; border-radius:3px; color:var(--ink2); font-size:8.5px; }
+footer b{ color:var(--ink2); }
+.gen{ display:block; margin-top:6px; color:#aab3c5; font-weight:600; }
+
+@page{ size:A4; margin:12mm 10mm; }
+@media print{
+  body{ width:auto; background:#fff; padding:0; }
+  .kpi,.card,.stat,.callout,table.grid{ box-shadow:none; }
+  section.break{ break-before:page; }
+  .callout,.card,.stat,.worst,.rec,.tier-row,tr,thead{ break-inside:avoid; }
+  table.grid{ break-inside:auto; }
+  h2{ break-after:avoid; }
+}
+
+.buckets{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:6px 0 4px; }
+.bk{ border-radius:12px; padding:14px 16px; }
+.bk.a{ background:#fdecec; border:1px solid #f4cccc; }
+.bk.b{ background:#fff6e8; border:1px solid #f3dfb8; }
+.bk .bt{ font-size:11px; font-weight:800; margin-bottom:3px; }
+.bk.a .bt{ color:var(--neg); } .bk.b .bt{ color:#b7791f; }
+.bk .bn{ font-size:26px; font-weight:800; letter-spacing:-1px; color:var(--ink); }
+.bk .bd{ font-size:10px; color:var(--ink2); margin-top:5px; }
+.bk .bd b{ color:var(--ink); }
+.evt{ text-align:left!important; white-space:normal!important; max-width:250px; font-size:9px; color:var(--ink2); line-height:1.45; }
+table.det td{ vertical-align:top; }
+.curve td.hi{ color:var(--pos); } .curve td.lo{ color:var(--neg); }
+.arrowdown{ color:var(--neg); font-weight:800; }
+</style></head><body>
+
+<header class="cover">
+  <div class="eyebrow">POLYMARKET · 全自动账户 · 专项复盘</div>
+  <h1>大亏损复盘报告</h1>
+  <div class="sub">聚焦 <b>2026-07-20 峰值 $106 → 2026-07-23 $93</b> 这轮回撤 · 生成于 <b>2026-07-23</b> · 版本 v8.3.1 · <b>无任何出入金，全部为交易变动</b> · 本报告只读</div>
+  <div class="kpis"><div class="kpi"><div class="kl">峰值总资产</div><div class="kv ">$105.97</div><div class="kd"><span class="chip zero">07-20</span></div></div>
+<div class="kpi"><div class="kl">现在总资产</div><div class="kv ">$93.26</div><div class="kd"><span class="chip zero">07-23</span></div></div>
+<div class="kpi"><div class="kl">本轮回撤</div><div class="kv neg">−$12.71</div><div class="kd"><span class="chip zero">峰值→现在</span></div></div>
+<div class="kpi"><div class="kl">其中·割肉净额</div><div class="kv neg">−$1.85</div><div class="kd"><span class="chip zero">已实现</span></div></div>
+<div class="kpi"><div class="kl">其中·浮盈回吐</div><div class="kv neg">−$10.86</div><div class="kd"><span class="chip zero">纸面利润没了</span></div></div></div>
+</header>
+
+<section class="callout">
+  <div class="co-h"><span class="pin">🔍</span> 一句话：钱没"亏光"，是"到嘴的利润又吐回去了"＋一波连环割肉</div>
+  <p>峰值 $106 到现在 $93，掉了 <b class="neg">−$12.71</b>，<b>没有出金</b>，全是交易。拆成两块看 —— 割肉是"真金没了"，回吐是"赚到过没落袋"：</p>
+  <div class="buckets">
+    <div class="bk a">
+      <div class="bt">① 真金割肉（已实现）</div>
+      <div class="bn neg">−$1.85</div>
+      <div class="bd">但底下是血战：<b class="neg">12 笔止损 −$8.67</b> 被 <b class="pos">11 笔止盈 +$6.82</b> 补回来。净额小，不代表没打仗。</div>
+    </div>
+    <div class="bk b">
+      <div class="bt">② 浮盈回吐（纸面）· 大头</div>
+      <div class="bn neg">−$10.86</div>
+      <div class="bd">07-20 冲上 $106 是一堆仓的<b>纸面</b>利润；这两天跌回去了。⚠️ 但手上仓<b>现在仍比成本高 +$4.30</b> —— 这不是亏进本金，是<b>赚到过、没卖、又还回去</b>。</div>
+    </div>
+  </div>
+  <table class="grid curve" style="margin-top:10px">
+    <thead><tr><th>日期</th><th>开盘</th><th>最高</th><th>最低</th><th>收盘</th><th>现金(收)</th></tr></thead>
+    <tbody><tr><td class="lbl">07-19</td><td class="num">$100.77</td><td class="num hi">$103.46</td><td class="num lo">$100.77</td><td class="num strong">$103.46</td><td class="num dim">$27.28</td></tr>
+<tr><td class="lbl">07-20</td><td class="num">$103.46</td><td class="num hi">$105.97</td><td class="num lo">$102.47</td><td class="num strong">$105.88</td><td class="num dim">$39.45</td></tr>
+<tr><td class="lbl">07-21</td><td class="num">$105.72</td><td class="num hi">$105.72</td><td class="num lo">$98.06</td><td class="num strong">$99.87</td><td class="num dim">$20.54</td></tr>
+<tr><td class="lbl">07-22</td><td class="num">$100.16</td><td class="num hi">$100.16</td><td class="num lo">$91.98</td><td class="num strong">$93.24</td><td class="num dim">$5.09</td></tr>
+<tr><td class="lbl">07-23</td><td class="num">$93.39</td><td class="num hi">$93.39</td><td class="num lo">$92.38</td><td class="num strong">$93.21</td><td class="num dim">$9.08</td></tr></tbody>
+  </table>
+  <p class="mini" style="margin-top:6px"><b class="arrowdown">↓</b> 痛点集中在 <b>07-21（$106→$98）和 07-22（$100→$92）两天</b>，连着两天割肉 + 回吐。</p>
+</section>
+
+<section class="break">
+  <h2><span class="n">1</span> 割肉仓位全明细 <em>（12 笔，合计 <b class="neg">−$8.67</b>；含标签/入场价/股数/事件）</em></h2>
+  <table class="grid det closed">
+    <thead><tr><th>亏$</th><th>方向</th><th>止损档</th><th>入场→卖出</th><th>收益率</th><th>股数</th><th>平仓方式</th><th>平仓时刻</th><th>市场</th><th>事件原因（为什么走反）</th></tr></thead>
+    <tbody><tr><td class="neg num strong">−$1.73</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.648→0.301</td><td class="neg num">−53.5%</td><td class="num dim">5股</td><td class="ek ek-止损">止损</td><td class="num dim">07-22 13:57</td><td class="lbl">Trump 会晤 Netanyahu(7/31)</td><td class="evt">押「7月底前不会见 Netanyahu」→ 会见预期骤升，NO 被打穿</td></tr>
+<tr><td class="neg num strong">−$1.71</td><td>YES</td><td><span class="badge b-co">收敛</span></td><td class="num dim">0.710→0.425</td><td class="neg num">−40.1%</td><td class="num dim">6股</td><td class="ek ek-止损">止损</td><td class="num dim">07-21 15:16</td><td class="lbl">Warsh 记者会提「油价」</td><td class="evt">押「Warsh 记者会会提『油价』」YES → 没提，YES 崩</td></tr>
+<tr><td class="neg num strong">−$1.25</td><td>NO</td><td><span class="badge b-co">收敛</span></td><td class="num dim">0.560→0.435</td><td class="neg num">−22.3%</td><td class="num dim">10股</td><td class="ek ek-止损">止损</td><td class="num dim">07-22 12:06</td><td class="lbl">7月正好 0 次地震</td><td class="evt">地震次数区间押反（这类量化冷门 GLM 没边际）</td></tr>
+<tr><td class="neg num strong">−$1.05</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.680→0.330</td><td class="neg num">−51.5%</td><td class="num dim">3股</td><td class="ek ek-止损">止损</td><td class="num dim">07-22 06:18</td><td class="lbl">俄军进 Vasylivka(7/31)</td><td class="evt">押「俄军7月底前进不了 Vasylivka」→ 俄军推进，NO 崩</td></tr>
+<tr><td class="neg num strong">−$0.74</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.840→0.655</td><td class="neg num">−22.0%</td><td class="num dim">4股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-21 21:44</td><td class="lbl">GPT-6 于 8/21 前发布</td><td class="evt">押「GPT-6 于 8/21 前不发布」→ 发布预期升温，NO 走弱</td></tr>
+<tr><td class="neg num strong">−$0.45</td><td>NO</td><td><span class="badge b-co">收敛</span></td><td class="num dim">0.830→0.795</td><td class="neg num">−4.2%</td><td class="num dim">13股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-21 07:08</td><td class="lbl">7月地震 ≤8 次</td><td class="evt">地震次数区间，回撤触发离场（同上冷门）</td></tr>
+<tr><td class="neg num strong">−$0.44</td><td>NO</td><td><span class="badge b-co">收敛</span></td><td class="num dim">0.640→0.530</td><td class="neg num">−17.2%</td><td class="num dim">4股</td><td class="ek ek-止损">止损</td><td class="num dim">07-22 16:02</td><td class="lbl">Warsh 说满20次 task force</td><td class="evt">押「Warsh 不会说满20次 task force」→ 押反</td></tr>
+<tr><td class="neg num strong">−$0.38</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.670→0.595</td><td class="neg num">−11.2%</td><td class="num dim">5股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-23 08:06</td><td class="lbl">untitled 谜市场(无标题)</td><td class="evt">谜市场（无标题）—— 反复贡献亏损，八成不该进宇宙</td></tr>
+<tr><td class="neg num strong">−$0.34</td><td>YES</td><td><span class="badge b-hy">综合</span></td><td class="num dim">0.440→0.325</td><td class="neg num">−26.1%</td><td class="num dim">3股</td><td class="ek ek-止损">止损</td><td class="num dim">07-21 19:45</td><td class="lbl">Mike Lindell 赢 MN 州长</td><td class="evt">押「Lindell 赢 MN 州长」YES → 概率下滑</td></tr>
+<tr><td class="neg num strong">−$0.27</td><td>NO</td><td><span class="badge b-co">收敛</span></td><td class="num dim">0.420→0.390</td><td class="neg num">−7.1%</td><td class="num dim">9股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-21 07:05</td><td class="lbl">里亚尔汇率 ≥1.9M</td><td class="evt">伊朗里亚尔汇率区间押反</td></tr>
+<tr><td class="neg num strong">−$0.18</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.840→0.815</td><td class="neg num">−3.0%</td><td class="num dim">7股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-21 07:32</td><td class="lbl">US×Iran 有效停火(8/14)</td><td class="evt">停火 NO 小幅回撤离场（小亏）</td></tr>
+<tr><td class="neg num strong">−$0.13</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.440→0.415</td><td class="neg num">−5.7%</td><td class="num dim">5股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-21 06:36</td><td class="lbl">胡塞袭船得手</td><td class="evt">押「胡塞不会得手」→ 小幅走反（小亏）</td></tr></tbody>
+  </table>
+  <p class="mini danger">规律很扎眼：<b>12 笔里 9 笔是 NO 单</b>，绝大多数是「押某事不会发生 / 冷门区间押反」→ 结果事件真发生了（要见 Netanyahu、俄军进 Vasylivka、GPT-6 发布升温…）。新止损把它们砍得又快又干净（好事），<b>但错的是上游方向</b>。</p>
+</section>
+
+<section class="break">
+  <h2><span class="n">2</span> 对冲掉一半的止盈 <em>（11 笔，合计 <b class="pos">+$6.82</b>）</em></h2>
+  <table class="grid det closed">
+    <thead><tr><th>赚$</th><th>方向</th><th>止损档</th><th>入场→卖出</th><th>收益率</th><th>股数</th><th>平仓方式</th><th>平仓时刻</th><th>市场</th><th>事件原因（为什么赚）</th></tr></thead>
+    <tbody><tr><td class="pos num strong">+$2.20</td><td>YES</td><td><span class="badge b-co">收敛</span></td><td class="num dim">0.630→0.945</td><td class="pos num">+50.0%</td><td class="num dim">7股</td><td class="ek ek-止盈">止盈</td><td class="num dim">07-20 16:40</td><td class="lbl">Trump 发「World Cup」</td><td class="evt">Trump 真在 Truth 发了「World Cup」→ 方向全中，本轮最大赢</td></tr>
+<tr><td class="pos num strong">+$0.97</td><td>NO</td><td><span class="badge b-hy">综合</span></td><td class="num dim">0.640→0.802</td><td class="pos num">+25.4%</td><td class="num dim">6股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-21 07:29</td><td class="lbl">Haley Stevens 密歇根提名</td><td class="evt">提名行情利好持有方向</td></tr>
+<tr><td class="pos num strong">+$0.87</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.770→0.945</td><td class="pos num">+22.7%</td><td class="num dim">5股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-23 07:13</td><td class="lbl">美国解除对土 CAATSA 制裁</td><td class="evt">解除制裁方向押对</td></tr>
+<tr><td class="pos num strong">+$0.69</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.570→0.915</td><td class="pos num">+60.6%</td><td class="num dim">2股</td><td class="ek ek-止盈">止盈</td><td class="num dim">07-21 17:51</td><td class="lbl">US×Iran 外交会晤(7/31)</td><td class="evt">外交会晤方向押对</td></tr>
+<tr><td class="pos num strong">+$0.64</td><td>YES</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.680→0.998</td><td class="pos num">+46.7%</td><td class="num dim">2股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-21 07:57</td><td class="lbl">Trump 现身 WC 冠军合影</td><td class="evt">Trump 现身冠军合影 → 兑现到 ~1.0</td></tr>
+<tr><td class="pos num strong">+$0.61</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.750→0.955</td><td class="pos num">+27.3%</td><td class="num dim">3股</td><td class="ek ek-止盈">止盈</td><td class="num dim">07-23 00:00</td><td class="lbl">Claude Opus 模型发布</td><td class="evt">方向押对，止盈落袋</td></tr>
+<tr><td class="pos num strong">+$0.33</td><td>YES</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.820→0.950</td><td class="pos num">+15.9%</td><td class="num dim">2股</td><td class="ek ek-止盈">止盈</td><td class="num dim">07-21 17:42</td><td class="lbl">Trump 公开侮辱某人</td><td class="evt">方向押对，分批止盈</td></tr>
+<tr><td class="pos num strong">+$0.19</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.830→0.905</td><td class="pos num">+9.0%</td><td class="num dim">2股</td><td class="ek ek-止盈">止盈</td><td class="num dim">07-21 15:22</td><td class="lbl">Iran 退出 MOU 谈判</td><td class="evt">止盈卖半</td></tr>
+<tr><td class="pos num strong">+$0.19</td><td>YES</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.820→0.895</td><td class="pos num">+9.1%</td><td class="num dim">2股</td><td class="ek ek-止盈">止盈</td><td class="num dim">07-21 15:43</td><td class="lbl">Trump 公开侮辱某人</td><td class="evt">方向押对，分批止盈</td></tr>
+<tr><td class="pos num strong">+$0.10</td><td>NO</td><td><span class="badge b-ev">事件</span></td><td class="num dim">0.810→0.860</td><td class="pos num">+6.2%</td><td class="num dim">2股</td><td class="ek ek-止盈">止盈</td><td class="num dim">07-22 21:38</td><td class="lbl">Russia 攻占 Kostyantynivka</td><td class="evt">止盈卖半</td></tr>
+<tr><td class="pos num strong">+$0.02</td><td>NO</td><td><span class="badge b-co">收敛</span></td><td class="num dim">0.660→0.665</td><td class="pos num">+0.8%</td><td class="num dim">4股</td><td class="ek ek-重评exit">重评exit</td><td class="num dim">07-22 07:43</td><td class="lbl">Ornn H100 指数区间</td><td class="evt">基本走平</td></tr></tbody>
+  </table>
+  <p class="mini">最大一笔 <b>Trump 在 Truth 发「World Cup」+$2.20</b>（方向全中、及时止盈落袋）。这些说明：<b>方向对 + 及时落袋</b>是能赚的；问题出在没落袋的那批（见回吐）和方向押反的那批（见割肉）。</p>
+</section>
+
+<section class="break">
+  <h2><span class="n">3</span> 现在还套着的仓 <em>（9 仓，合计浮亏 −$1.59；下一批止损候选）</em></h2>
+  <table class="grid">
+    <thead><tr><th>市场</th><th>方向</th><th>浮亏$</th><th>价格收益</th><th>入场→现价</th><th>q</th><th>止损档</th><th>状态</th></tr></thead>
+    <tbody><tr><td class="lbl">Israel closes its airspace by Jul…</td><td>NO</td><td class="neg num strong">−$0.73</td><td class="neg num">−12.7%</td><td class="num dim">0.830→0.725</td><td class="num dim">0.77</td><td><span class="badge b-ev">事件</span></td><td class="st">HOLD</td></tr><tr><td class="lbl">US-Iran 60 day negotiation period…</td><td>NO</td><td class="neg num strong">−$0.39</td><td class="neg num">−19.1%</td><td class="num dim">0.680→0.550</td><td class="num dim">0.77</td><td><span class="badge b-ev">事件</span></td><td class="st">HOLD</td></tr><tr><td class="lbl">Iran full airspace closure by Jul…</td><td>NO</td><td class="neg num strong">−$0.22</td><td class="neg num">−8.2%</td><td class="num dim">0.670→0.615</td><td class="num dim">0.64</td><td><span class="badge b-ev">事件</span></td><td class="st">HOLD</td></tr><tr><td class="lbl">Trump declassifies new UFO files …</td><td>YES</td><td class="neg num strong">−$0.11</td><td class="neg num">−7.7%</td><td class="num dim">0.710→0.655</td><td class="num dim">0.85</td><td><span class="badge b-ev">事件</span></td><td class="st">HOLD</td></tr><tr><td class="lbl">Will Cori Bush be the Democratic …</td><td>NO</td><td class="neg num strong">−$0.05</td><td class="neg num">−3.3%</td><td class="num dim">0.450→0.435</td><td class="num dim">0.57</td><td><span class="badge b-hy">综合</span></td><td class="st">HOLD</td></tr><tr><td class="lbl">Will Mexico GDP growth in Q2 2026…</td><td>NO</td><td class="neg num strong">−$0.03</td><td class="neg num">−0.8%</td><td class="num dim">0.660→0.655</td><td class="num dim">0.73</td><td><span class="badge b-co">收敛</span></td><td class="st">HOLD</td></tr><tr><td class="lbl">Israel closes its airspace by Aug…</td><td>NO</td><td class="neg num strong">−$0.03</td><td class="neg num">−0.8%</td><td class="num dim">0.620→0.615</td><td class="num dim">0.62</td><td><span class="badge b-ev">事件</span></td><td class="st">MARGINAL</td></tr><tr><td class="lbl">Will the Bank of Korea hold at th…</td><td>YES</td><td class="neg num strong">−$0.02</td><td class="neg num">−0.7%</td><td class="num dim">0.750→0.745</td><td class="num dim">0.79</td><td><span class="badge b-co">收敛</span></td><td class="st">HOLD</td></tr><tr><td class="lbl">Will bitcoin hit $1m before GTA V…</td><td>NO</td><td class="neg num strong">−$0.01</td><td class="neg num">−0.5%</td><td class="num dim">0.504→0.501</td><td class="num dim">0.50</td><td><span class="badge b-hy">综合</span></td><td class="st">MARGINAL</td></tr></tbody>
+  </table>
+  <p class="mini">浮亏都不大（最深 Israel 领空 NO −12.7%）。若继续走反，事件型跌破 −50% / 收敛综合回撤到线，会被新止损自动平掉，不用手动盯。</p>
+</section>
+
+<section class="break">
+  <h2><span class="n">4</span> 我对这次大亏损的分析</h2>
+  <div class="two">
+    <div class="card"><div class="ch">① 止损其实"救了场"，不是"闯的祸"</div>
+      <p class="mini">这波 STOP_LOSS 把 Netanyahu(−$1.73)、Warsh(−$1.71)、Vasylivka(−$1.05) 这些方向押反的仓<b>又快又干净地砍掉</b>，没让它们变成第二个 Gemini（−76%）。割肉侧 −$8.67 听着吓人，但<b>每笔都是及时止血</b>——这正是上周刚上的硬止损在干活。</p>
+    </div>
+    <div class="card"><div class="ch">② 真正的病：上游选品方向系统性押反</div>
+      <p class="mini">12 笔割肉 <b>9 笔 NO</b>，清一色「押某事不会发生」被现实打穿。这跟你之前问的<b>GLM 选品准确率</b>是同一个根 —— 止损再利索，也只是替糟糕的选品<b>兜底</b>，救不回方向本身。冷门量化盘（地震次数、汇率区间、Warsh 说不说某词）GLM 尤其没边际。</p>
+    </div>
+    <div class="card"><div class="ch">③ 最大的钱其实丢在"没落袋"上（−$10.86）</div>
+      <p class="mini">割肉净额才 −$1.85，回撤的大头是<b>纸面利润回吐 −$10.86</b>。07-20 一堆仓冲到高位（$106），系统<b>没有在高位保护/落袋</b>，眼看又跌回来。止盈只在触发 0.92/翻倍那种硬线才动，中间的大幅回撤不管。</p>
+    </div>
+    <div class="card"><div class="ch">④ 换手太密，小额空转</div>
+      <p class="mini">3 天平了 23 笔、还开了一批新仓，现金从 $33 打到 $9。里面不少是 ±$0.13~0.45 的小额重评离场，<b>产出接近 0 却每次吃价差</b>。高频小进小出把边际磨掉了。</p>
+    </div>
+  </div>
+</section>
+
+<section class="break">
+  <h2><span class="n">5</span> 改进策略（按对这次亏损的针对性排序）</h2>
+  <div class="rec todo"><div class="rh">🎯 直击最大亏损源（回吐 −$10.86）</div>
+    <ul>
+      <li><b>① 给盈利仓加"移动止盈/高位保护"</b>（最关键）：一个仓涨到 +X%（比如 +25%）后，挂一条<b>跟随高点回撤 N% 就落袋</b>的线，把利润锁住。这轮 $106 若有这条，能保住大半回吐的钱。<span class="dim">（这是本次唯一直击"回吐"的措施，幅度你定）</span></li>
+      <li><b>② 账户级总回撤闸</b>（上版就建议、仍没做）：从峰值回撤 &gt; $N 或 &gt;X% → 暂停开新仓 + 报警。$106→$93 这种滑坡本该被它拦一下。</li>
+    </ul>
+  </div>
+  <div class="rec todo"><div class="rh">🧭 治上游（选品方向押反）</div>
+    <ul>
+      <li><b>③ 临近到期的 NO 单加约束</b>：9/12 割肉是「押不会发生」在事件逼近时被打穿。可对<b>剩余天数少、且盘口正在朝反方向走</b>的 NO 单收紧（少下 / 更快认输）。</li>
+      <li><b>④ 冷门量化盘拉黑或降权</b>：地震次数、汇率区间、"某人会不会说某词"这类 GLM 没边际的盘，连亏且贡献 untitled 那类亏损，考虑排除或只进测试仓。</li>
+    </ul>
+  </div>
+  <div class="rec todo"><div class="rh">🧹 减磨损</div>
+    <ul>
+      <li><b>⑤ 抬高浅水重评离场门槛</b>：±$0.5 以内的小额重评 exit 别做，省价差+API；让小波动自己走，别高频进出。</li>
+    </ul>
+  </div>
+  <p class="mini" style="margin-top:8px"><b>一句话总览</b>：止损没错、反而立功；这次亏在 ①高位没落袋（回吐 −$10.86）＋②选品方向押反（割肉 −$8.67）。<b>最高性价比的一步 = 给盈利仓加移动止盈</b>，直接堵住最大的窟窿。以上都可先纸面确认，我不擅自动钱/改参数。</p>
+</section>
+
+<footer>
+  数据源：实时 <code>/api/auto/holdings</code> + <code>v4.db</code>（closed_positions 平仓明细 / portfolio_snapshot 资产曲线）。回撤 = 峰值 assets_total($106,07-20) − 现在；割肉净额 = 07-20 后 closed_positions 已实现累计；浮盈回吐 = 回撤 − 割肉净额（即纸面 mark-to-market 变动）。事件原因为人工标注。<b>本报告只读，未触碰任何仓位或参数。</b>
+  <span class="gen">Polymarket AUTO v8.3.1 · 亏损复盘 · 生成于 2026-07-23</span>
+</footer>
+</body></html>

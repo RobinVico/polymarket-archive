@@ -1,0 +1,22 @@
+# Polymarket AUTO — 依赖 (版本 pin 自 2026-07-06 老项目实跑环境, python 3.12)
+# 注意: py_clob_client_v2==1.0.2 已 vendor 在仓库根目录 py_clob_client_v2/ (import 优先于 pip 装的)
+# (1.0.2 必须: 支持 POLY_1271/sig=3 存款钱包流的 order signer; 下面 6 个是它的依赖)
+
+# Web
+flask==3.1.3
+requests==2.33.1
+urllib3==2.6.3
+certifi==2026.2.25
+python-dotenv==1.2.2
+
+# LLM
+zhipuai==2.1.5.20250825
+anthropic==0.109.2
+
+# py_clob_client_v2 的依赖
+eth-account==0.13.7
+eth-utils==6.0.0
+httpx==0.28.1
+h2==4.3.0
+poly_eip712_structs==0.0.1
+py_order_utils==0.3.2

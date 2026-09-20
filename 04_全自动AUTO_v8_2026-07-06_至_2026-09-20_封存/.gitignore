@@ -1,0 +1,30 @@
+# 凭据 — 永不进 git
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# 运行时环境
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# 日志
+*.log
+nohup.out
+
+# 数据库 (交易真值, 不进 git)
+v4.db
+v4.db*
+*.db-shm
+*.db-wal
+
+# 运行时生成物
+last_scan.md
+data/scan_reports/*.md
+data/scan_reports/manifest.json
+!data/scan_reports/.gitkeep
+
+.DS_Store

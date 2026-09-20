@@ -1,0 +1,469 @@
+New chat
+Search
+Customize
+Chats
+Projects
+Artifacts
+Code
+Recents
+Hide
+预测市场低估事件识别与投资分析
+Polymarket自动化交易机器人完整流程设计
+预测市场低估事件识别与投资分析
+预测市场低估事件识别与投资分析
+预测市场低估事件发掘系统
+预测市场低估事件识别系统
+预测市场低估事件识别与投资分析
+Polymarket排行榜顶级交易者的下注策略分析
+预测市场低估事件的交易分析框架
+预测市场低估事件发掘系统
+Polymarket低概率事件套利分析
+Gemini Deep Research数据不准确的解决方案
+Fed interest rate increase probability for April 2026
+Fed rate hike probability in April 2026
+赌注网址
+美联储2026年6月加息预期
+WTI crude oil price forecast for 2026
+Untitled
+Fed interest rate increase probability for April 2026
+Trump pardon probability analysis
+Polymarket pricing discrepancy analysis
+AI工具对比：市场调研最佳选择
+Google邮箱登录和执行流程优化
+美国销售科创产品的平台选择
+初始问候
+R
+Robin
+Max plan
+预测市场低估事件识别与投资分析
+
+你是预测市场交易系统的核心决策引擎。请完成以下任务：
+【第一步：搜索】
+去 polymarket.com 搜索当前市场价在 $0.01-$0.15（即1%-15%概率）之间的事件。
+重点关注以下类别：政治、体育、加密货币、经济数据、科技、天气。
+找出你认为真实概率被市场严重低估的候选标的。
+重要：你必须从polymarket.com的真实URL中获取slug。例如 https://polymarket.com/event/will-fed-raise-rates 中的 slug 是 will-fed-raise-rates。不要编造slug。
+【第二步：深度分析】
+对最有潜力的候选标的执行以下分析框架：
+1. Base Rate：历史上同类事件发生的基础概率，给出具体数字和来源
+2. 增量证据：哪些当前公开信息支持真实概率高于市场价？只采信权威信源
+3. 流动性：该市场24小时交易量大约多少？
+4. 时间框架：距结算还有多久？超过90天的不推荐
+【第三步：自我对抗验证】
+扮演魔鬼代言人：
+- 最强的反对论点是什么？
+- Base Rate数据来源是否可靠？
+- 是否存在你可能遗漏的重大风险？
+- 真实概率是否存在过度自信？
+只有通过自我验证的标的才推荐。
+【第四步：输出】
+最终只推荐最多1个标的。先写完整分析过程，然后在回复最末尾单独一行输出JSON：
+{{"bets":[{{"slug":"从polymarket.com复制的真实slug","q":"事件问题","side":"YES或NO","mp":当前市场价,"tp":你评估的真实概率,"conf":"high或medium或low","settle":"2026-xx-xx","reason":"50字内核心理由"}}]}}
+如果无推荐：{{"bets":[]}}
+硬性约束：mp在0.01-0.15之间，tp/mp >= 2.5，tp不超过0.60，结算日90天以内。
+排除以下已持仓市场：
+none
+
+Show more
+4:06 PM
+认可请求并启动预测市场低概率事件研究任务。
+认可请求并启动预测市场低概率事件研究任务。
+
+The user wants me to research Polymarket for low-probability events (1-15% market price) that might be undervalued. This is a clear, detailed request - I should launch the research task immediately without clarifying questions.
+
+Done
+
+这是一个非常详细和明确的请求，我会立即启动深度研究，去Polymarket寻找当前市场价在1%-15%之间、可能被严重低估的事件标的。
+
+# Polymarket undervalued event research
+Research complete
+•
+Writing and citing report...
+834 sources
+•
+22m 46s
+
+Your Polymarket mispricing analysis is ready. It identifies Tunisia to win FIFA World Cup Group F as the strongest edge, trading at ~2.9¢ on Polymarket versus 8–10% implied probability across major sportsbooks—a 2.9x–3.4x edge ratio. The report covers the screening methodology across hundreds of markets, Tunisia's defensive credentials and upset history, key counterarguments including coaching instability and a 0-for-6 World Cup group-stage record, sportsbook line reliability, and why alternative candidates in politics, weather, and other sports fell short of the 2.5x threshold.
+
+Tunisia in World Cup Group F: A Hidden Polymarket Edge
+Document 
+# Tunisia in World Cup Group F: a hidden Polymarket edge
+
+**The single most actionable mispricing on Polymarket today is Tunisia to win FIFA World Cup Group F, trading at roughly 2–3 cents while major sportsbooks price the same outcome at 8–10%.** Th
+
+Based on your research above, now output ONLY a single line of JSON. No other text.
+If you found a recommendation:
+{"bets":[{"slug":"exact-polymarket-slug","q":"full question","side":"YES or NO","mp":0.03,"tp":0.12,"conf":"medium","settle":"2026-xx-xx","reason":"50 char reason"}]}
+If no recommendation:
+{"bets":[]}
+Output only the JSON line, nothing else.
+
+4:32 PM
+Prepared JSON output based on prior research findings
+Prepared JSON output based on prior research findings
+
+{"bets":[{"slug":"fifa-world-cup-group-f-winner","q":"Will Tunisia win FIFA World Cup Group F?","side":"YES","mp":0.029,"tp":0.09,"conf":"medium","settle":"2026-06-27","reason":"Sportsbooks price Tunisia 8-10%; Polymarket at 3% due to thin liquidity"}]}
+
+
+
+
+Opus 4.6
+Extended
+Claude is AI and can make mistakes. Please double-check responses.
+# Polymarket undervalued event research
+Research plan created
+Gathered 834 sources
+
+polymarket.com
+
+370 sources
+
+en.wikipedia.org
+
+29 sources
+
+espn.com
+
+14 sources
+
+nba.com
+
+9 sources
+
+412 other sources
+
+Polymarket's 1-15% probability markets reveal notable mispricing opportunities, including a 4-6% probability assigned to a magnitude 10.0+ earthquake before 2027 despite USGS considering such events physically impossible, alongside AI model leadership markets showing Anthropic dominating at ~90% with OpenAI at just ~4% for end-of-April rankings.
+111 sources
+Polymarket shows low-probability political events including Trump leaving office by June 30 (6%), Trump impeachment by June 30 (5%), and Argentina dollarization (2-3%), with most extreme political/economic scenarios priced between 1-15%
+90 sources
+Polymarket's 2026 NBA Champion market ($387M volume, settling Jul 1) has 17 teams priced between 1-15%, while the FIFA World Cup Winner market ($271M volume) has 23 teams in that range, with Bitcoin/Ethereum price target markets offering additional low-probability outcomes
+79 sources
+Boston Celtics most undervalued on Polymarket at 12% vs 15-17% sportsbook odds, while LA Lakers most overvalued at 2.1% despite Doncic/Reaves injuries crashing sportsbook odds to 0.3-0.8%
+55 sources
+Comprehensive Polymarket survey identifying 16+ prediction markets in the 1-15% probability range settling before July 12, 2026, including Trump impeachment (5%), hurricane formation by May 31 (6%), Pluto reclassification (11%), and Fed rate cut at June meeting (8-11%), amid rising inflation (CPI at 3.3% YoY), an ongoing DHS government shutdown, and US-Iran tensions including a Hormuz Strait blockade.
+97 sources
+Pre-June Atlantic hurricanes (74+ mph) are extremely rare at ~2-3% historically, making Polymarket's 6-8% price likely overpriced 2-3x — the market appears to conflate common pre-June tropical storms with the much rarer actual hurricanes, and 2026's developing El Niño and below-average Atlantic SSTs further suppress the probability
+73 sources
+Polymarket massively underprices Tunisia winning FIFA World Cup Group F at 1.8% versus 8-10% at major sportsbooks (4.6-5.5x edge), likely due to extremely thin liquidity ($13.9K volume), with Scotland winning Group C showing a secondary 1.9-2.5x mispricing
+69 sources
+Fed June 2026 rate cut priced at 8-11% on Polymarket is roughly fair to slightly overpriced versus CME FedWatch's 5-7%, with no exploitable mispricing—Hormuz blockade oil shock, 3.3% headline CPI, and strong labor data overwhelmingly favor a hold, pushing likely first cut to September at earliest
+101 sources
+Boston Celtics appear 35-60% underpriced on Polymarket (~11.2%) versus sportsbooks (~15-17%) and analytical models (up to 17.66%), with Dunks & Threes EPM rating them the #1 team in the NBA, though fair value of 15-18% falls well short of the 30%+ threshold needed for a 2.5x opportunity
+83 sources
+Tunisia appears significantly underpriced on Polymarket at 2.9% to win World Cup Group F, roughly 3-4x lower than sportsbook odds of 8-12.5%, driven by low market liquidity ($56.5K) despite Tunisia's historically elite defensive qualifying record of zero goals conceded across 10 matches
+76 sources
+Boom! Research report is ready
+834 sources
+site:polymarket.com economics 2026
+
+10 results
+
+site:polymarket.com politics 2026
+
+10 results
+
+site:polymarket.com federal reserve rate cut 2026
+
+10 results
+
+site:polymarket.com Trump impeachment resign 2026
+
+10 results
+
+site:polymarket.com Iran war 2026 low probability
+
+10 results
+
+site:polymarket.com "ends in" politics "5%" OR "3%" OR "2%" OR "1%" OR "4%" OR "8%" OR "10%" OR "12%" 2026
+
+10 results
+
+site:polymarket.com "June 30" OR "May 31" OR "April 30" politics economics 2026 low probability
+
+10 results
+
+site:polymarket.com "Trump out as President by June 30"
+
+3 results
+
+site:polymarket.com Argentina dollarize June 2026
+
+10 results
+
+site:polymarket.com sports 2026
+
+10 results
+
+site:polymarket.com NBA 2026
+
+10 results
+
+site:polymarket.com bitcoin 2026
+
+10 results
+
+site:polymarket.com crypto price June July 2026
+
+10 results
+
+site:polymarket.com ethereum price 2026
+
+10 results
+
+site:polymarket.com "FIFA World Cup" 2026 winner
+
+10 results
+
+site:polymarket.com "bitcoin" "price" "april" OR "may" OR "june" 2026 hit
+
+10 results
+
+site:polymarket.com technology 2026
+
+10 results
+
+site:polymarket.com weather 2026
+
+10 results
+
+site:polymarket.com earthquake 2026
+
+10 results
+
+site:polymarket.com hurricane 2026
+
+10 results
+
+site:polymarket.com AI aliens volcano 2026 low probability
+
+10 results
+
+polymarket low probability markets technology weather science 2026
+
+10 results
+
+site:polymarket.com "5%" OR "3%" OR "4%" OR "2%" OR "1%" 2026 AI technology
+
+10 results
+
+site:polymarket.com "megaquake by june 30" OR "named storm" OR "Chinese AI model" OR "volcano" 2026
+
+10 results
+
+site:polymarket.com "meteor strike" OR "starship" OR "SpaceX IPO" OR "solar storm" 2026
+
+10 results
+
+site:polymarket.com "before 2027" OR "by June 30" low odds science technology
+
+10 results
+
+site:polymarket.com recession 2026
+
+10 results
+
+site:polymarket.com rate cut 2026
+
+10 results
+
+site:polymarket.com event may 2026
+
+10 results
+
+site:polymarket.com event june 2026
+
+10 results
+
+polymarket government shutdown debt ceiling 2026
+
+10 results
+
+polymarket hurricane may 2026
+
+10 results
+
+polymarket 2026 NBA champion odds
+
+10 results
+
+polymarket trump impeached out president 2026
+
+10 results
+
+polymarket "fed decision in june" OR "fed decision in may" 2026
+
+10 results
+
+NBA standings April 2026
+
+10 results
+
+2026 NBA championship odds sportsbook
+
+10 results
+
+NBA championship odds April 2026 latest
+
+10 results
+
+Detroit Pistons Cade Cunningham injury update April 2026
+
+10 results
+
+NBA injury updates playoffs 2026 Wembanyama Cunningham Doncic
+
+10 results
+
+pre-season atlantic hurricane frequency
+
+10 results
+
+atlantic hurricane before june 1 historical
+
+10 results
+
+earliest atlantic hurricane on record 74 mph
+
+10 results
+
+atlantic hurricane category 1 before june list years
+
+10 results
+
+"hurricane" "may" OR "april" OR "march" atlantic 74 mph before june
+
+10 results
+
+off-season atlantic hurricanes wikipedia list pre-june hurricane intensity
+
+10 results
+
+2026 atlantic sea surface temperature april hurricane early season
+
+10 results
+
+FiveThirtyEight NBA predictions 2026
+
+10 results
+
+NBA championship probability analytical model 2026
+
+10 results
+
+Boston Celtics championship probability 2026 NBA model
+
+10 results
+
+Cade Cunningham collapsed lung injury update April 2026
+
+10 results
+
+Celtics net rating defense 2025-26 NBA season statistics
+
+10 results
+
+Dunks and Threes NBA model championship predictions 2026
+
+10 results
+
+"Dunks and Threes" Celtics championship probability 2026 EPM
+
+10 results
+
+Polymarket Celtics championship odds April 2026
+
+10 results
+
+CME FedWatch tool June 2026 rate cut probability
+
+10 results
+
+polymarket fed decision june 2026
+
+10 results
+
+fed funds futures June 2026 FOMC expectations
+
+10 results
+
+Hormuz blockade April 2026 economic impact
+
+10 results
+
+CPI March 2026 April 10 fed rate expectations
+
+10 results
+
+unemployment rate April 2026 labor market
+
+10 results
+
+Goldman Sachs JPMorgan fed forecast 2026 rate cut
+
+10 results
+
+fed rate cut probability after CPI April 2026 FedWatch
+
+10 results
+
+financial stress index April 2026 recession risk
+
+10 results
+
+"rate cut" probability June 2026 April market pricing
+
+10 results
+
+2026 World Cup group odds bookmaker
+
+10 results
+
+polymarket FIFA World Cup 2026 group winner
+
+10 results
+
+polymarket secession
+
+10 results
+
+site:polymarket.com "group D winner" OR "group E winner" OR "group H winner" World Cup
+
+10 results
+
+polymarket undervalued markets 2026 arbitrage
+
+10 results
+
+polymarket "state secession" OR "Texas secession" vote 2026
+
+10 results
+
+Tunisia 2026 World Cup group F
+
+10 results
+
+2026 World Cup group F preview odds
+
+10 results
+
+Tunisia FIFA ranking April 2026
+
+10 results
+
+Tunisia national football team 2025 2026 recent results matches
+
+10 results
+
+"group F" winner odds betting Netherlands Japan Tunisia World Cup 2026
+
+10 results
+
+Tunisia 2026 World Cup qualifying results CAF group H record
+
+10 results
+
+Tunisia recent match results 2025 2026 friendlies AFCON
+
+10 results
+
+Share

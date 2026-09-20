@@ -1,0 +1,15 @@
+- [Docs i18n parity (中英双版同步)](docs-i18n-parity.md) — 任何 `技术报告.md` 改动必须同时改 `TECHNICAL_REPORT.md`; README/SECURITY 同理
+- [文档/PPT 同步铁律](docs-sync-all-on-change.md) — 改任何策略/代码/版本后当次同步全部文档+两个PPT(内部gen_strategy_ppt.py + 分享版gen_strategy_ppt_share.py), 完整清单在CLAUDE.md, 分享版最易漏
+- [Funnel 有意开启](funnel-intentionally-on.md) — Funnel on 是为 gmail-pubsub 公网推送, 用户已确认不用管, 不要关/不要再提醒
+- [DNS 污染 polymarket 域名](dns-poisoning-polymarket.md) — API 全空/全挂先查 DNS; gamma_client DoH guard 已兜底, 独立脚本记得 install
+- [cron push 失败积压](cron-push-failing-backlog.md) — [已修复 2026-06-15] 根因=cron 够不到钥匙串; 已加 store 凭证 fallback+失败 sentinel; 再积压看 data/.backup_push_failing (多半 PAT 过期)
+- [event_driven 退出 / 出场策略重设计](event-driven-exit-keep-status-quo.md) — 真根因=重评 q 锚定现价; **v7.0 已上线(2026-06-22)**: 重评喂砸盘前中枢 + 事件型 exit 护栏 + 分批止盈 + 收敛移动止损; docs+UI 全部已升 v7.0 (含技术报告中英 §二十七/§27); 事件型现有两道护栏(auto_reeval.py): `guard_event_driven_exit`(exit 需论点破/edge≤-8pp)+ `guard_event_driven_cancel`(7.5.3: 禁 API cancel_autostop, 保 7.4.3 的 -60% 兜底不被撤; 用户手动 /api/toggle_auto_stop 仍能关); 事件型止损档=入场-60%(7.4.3)+$0.05地板, 砸穿→重评
+- [对用户用人话解释](plain-language-explanations.md) — 策略/计划/复盘类先给大白话三段式(问题→怎么改→怎么做)+ 拿他真实仓位举例; 别甩技术细节; 每次升级都汇报改了什么
+- [测试仓/模拟盘 /paper](paper-trading-feature.md) — v7.1 阶段1 已上线: 不真下单的仓位验证, 跑同一套算法; 🔒铁律=paper 绝不调 executor.sell/buy; ⬜阶段2=测试仓也跑重评
+- [auto-reeval 设计/状态](auto-reeval-pending-changes.md) — ✅2026-06-18 全部实现: 分档触发 + 4 决策(含 cancel_autostop) + 在线=手动省钱/离线=自动执行(动真钱); ⚠️离线自动卖出路径未实测; v7.x(0622): 主用翻 Claude(权威)+智谱降备用+每次双跑, GLM 只在新页 /api_reeval 对比(别处不显示); v7.5.2(0709): 修 GLM"未返回JSON决策"根因=reasoning_effort=max 思考太长被 max_tokens=32000 的 finish_reason=length 截断(非超时)→ max_tokens升120K+超时1200s+加finish_reason日志; 排错先看 bot.log 的 `GLM 响应: finish_reason=`(length=还不够/stop=完成)
+- [副屏控制台 spec/进度](control-panel-spec.md) — ✅A漏填提醒 ✅C主页紧急红闪弹窗; ⬜B 副屏控制面板 /panel 新页面待建(下一步)
+- [Dashboard 20项大改清单](dashboard-overhaul-2026-07.md) — 2026-07-05起分批改; 前3波8项已锁定spec开做(版本号/事件榜6h1d/右上按钮/资产曲线/history卡片/持仓拆3tab/自动清空48h/手机版往期卡片); #4#9#20#18待问; 统计分析+测试仓历史+策略=最难波
+- [动态热门标签 /tags](dynamic-tag-discovery.md) — tag 跟交易量热度走(俄乌→伊朗→世界杯), suggest-only board; ✅引擎+/tags页+采纳/退场/拉黑+scanner解析动态tag; ⬜进一键全扫+每日自动刷新
+- [策略总览 PPT 生成器](strategy-ppt-generator.md) — 可打印企业 PPT 在项目根目录; scripts/gen_strategy_ppt.py 重新生成; 内容是代码快照, 升版本要先核对再重生成
+- [全自动新账户计划](full-auto-account-plan.md) — ✅基础已搭(~/polymarket-auto, 5052, 私有repo polymarket-auto); 🚀全自动已上线(07-08晚): 扫描→选品→40~85分流→真买/测试仓 E2E实测过; 方向反问守卫+日限$10+8仓+强制离线; **远程访问(2026-07-16): 全自动 dashboard 挂在 `tailscale serve --https=8443`(tailnet-only, 非Funnel, 用户拍板保安全) → `https://baymaxs-mac-mini.tailc6dc26.ts.net:8443`; 半自动(5051)是 Funnel公网443。⚠️真钱全自动 bot 别上 Funnel公网(权限classifier也会拦)**; ⬜熔断线/通知渠道待商讨
+- [天气 bot (~/天气, 5053)](weather-bot-project.md) — 2026-07-12建, 日落后买当日最高温档吃1~5%确定性; 香港=HKO总部站floor取整(9/9实证)非机场METAR; 新号必须sig=3+clob 1.0.2; ⬜待用户开新钱包填.env
