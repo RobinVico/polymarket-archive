@@ -1,53 +1,54 @@
-# Polymarket 全自动交易系统 (AUTO v8.5.5)
+<div align="right"><b>English</b> | <a href="README.zh.md">中文</a></div>
 
-> Fully-autonomous Polymarket trading system: scheduled scanning → LLM market discovery → rule-based routing → auto order execution → position monitoring → auto re-evaluation → auto exit. Three live accounts ran three exit-strategy variants on the same AI recommendations. Credentials removed; see `最新版_全自动AUTO_v8.5.5_三账户策略/`.
+# Polymarket Fully-Autonomous Trading System (AUTO v8.5.5)
 
-这是本项目的**最新版本**：一套零人工的 Polymarket 预测市场全自动交易系统，代码在 [`最新版_全自动AUTO_v8.5.5_三账户策略/`](最新版_全自动AUTO_v8.5.5_三账户策略/)。
+> A zero-human-intervention trading system for Polymarket prediction markets: scheduled scanning → LLM market discovery → hard-coded routing rules → automatic order execution → position monitoring → automatic re-evaluation → automatic exit. The same AI recommendations fed **three live-money accounts** running three different exit strategies. This is the **latest version**; code lives in [`latest_AUTO-v8.5.5_three-account-system/`](latest_AUTO-v8.5.5_three-account-system/).
 
-## 它是怎么运行的
+## How it works
 
-**一条全自动流水线**（一个进程，端口 5052）：
+**One fully automatic pipeline** (single process, port 5052):
 
 ```
-定时扫描 ──→ GLM 选品 ──→ 写死规则分流 ──→ 自动下单 ──→ 盯盘 ──→ 自动重评 ──→ 自动出场
-09:00/21:00   联网深度调研    0.40<价<0.85     Kelly仓位     每30秒     大跌触发+每日     止盈/止损
-27个白名单tag  输出JSON推荐    真买,否则测试仓   +信心乘数                15:00全仓巡检     /重评说卖
+Scheduled scan → LLM discovery → Hard-coded routing → Auto order → Monitoring → Auto re-eval → Auto exit
+09:00/21:00      agentic web      0.40<price<0.85     Kelly sizing   every 30s    dip-triggered +    TP / SL /
+27 whitelisted   research,        real money, else    + confidence                daily 15:00        re-eval says
+tags             JSON output      paper account       multiplier                  full sweep         sell
 ```
 
-1. **扫描**：每天 09:00 / 21:00 扫 27 个白名单 tag（`modules/tags.py`），机械过滤流动性/价格/日期，产出候选报告；
-2. **选品**：候选 ≥5 个的 tag 送智谱 GLM（多轮自主联网搜索 agent），回结构化 JSON 推荐（方向 + 胜率估计 q + 信心）；
-3. **分流**：写死规则——新鲜盘口价在 0.40~0.85 之间才真钱买入，其余进免费测试仓；关键词黑名单强制只进测试仓；
-4. **下单**：1/4 Kelly 公式定仓位（本金参考冻结 $50，信心乘数 ×0.75~1.25，单仓硬顶 $5），临下单复核盘口漂移 >3pp 就放弃；
-5. **盯盘**（纯价格逻辑，零 API 成本）：三档止损——收敛型峰值回撤 20%、混合型 35%、事件型 −50% 硬止损，连拍确认直接平仓；止盈翻倍全卖 / 0.92 卖半等梯队；
-6. **重评**：事件型仓位从持有期最好点回撤 ≥5pp 触发一次 GLM 重评 + 每天 15:00 全仓巡检；重评判 exit 立刻卖出，配方向纠错反问闸防 AI 填反数字。
+1. **Scan** — twice a day (09:00 / 21:00) across 27 whitelisted tags (`modules/tags.py`); mechanical filters on liquidity / price / dates produce candidate reports.
+2. **Discovery** — tags with ≥5 candidates go to Zhipu GLM (a multi-round agentic web-search loop) which returns structured JSON recommendations (side + probability estimate *q* + confidence).
+3. **Routing** — hard-coded rule: only fresh quotes between **0.40 and 0.85** are bought with real money; everything else goes to a free paper account. Keyword-blacklisted markets are forced into paper, never real money.
+4. **Execution** — quarter-Kelly position sizing (bankroll reference frozen at $50, confidence multiplier ×0.75~1.25, $5 hard cap per position); a final pre-order quote check aborts if the price drifted >3pp.
+5. **Monitoring** (pure price logic, zero API cost) — three stop-loss tiers: *convergent* 20% off peak, *hybrid* 35% off peak, *event-driven* hard stop at −50%; confirmed over consecutive ticks, then sold directly. Take-profit ladder: 2× sells all, 0.92 sells half, etc.
+6. **Re-evaluation** — an event-driven position that retraces ≥5pp from its best point during the holding period triggers one GLM re-eval; plus a daily 15:00 sweep over all positions. If the re-eval says *exit*, it sells immediately — guarded by a direction-sanity re-ask gate that prevents the LLM from flipping the probability to the wrong side.
 
-**同一批 AI 推荐喂三个真钱账户**，对照三种出场哲学：
+**The same recommendations fed three live accounts**, comparing three exit philosophies:
 
-| 账户 | 出场规则 | 入口 |
+| Account | Exit rule | Entry point |
 |---|---|---|
-| 主账户 | 上面的完整策略 | `modules/auto_trader.py` + `modules/monitor.py` |
-| Bench 基准 | 照单全收，仅「亏 30% 即卖」，其余持有到结算 | `modules/auto_bench.py` |
-| Shadow 低价 | 只买 ≤0.40 的推荐，−60% 止损，不止盈持有到结算 | `modules/auto_shadow.py` |
+| Main | Full strategy above | `modules/auto_trader.py` + `modules/monitor.py` |
+| Bench (baseline) | Take every recommendation; only rule: sell at −30%; otherwise hold to resolution | `modules/auto_bench.py` |
+| Shadow (low-price) | Only buy recommendations ≤0.40; −60% stop loss; no take-profit, hold to resolution | `modules/auto_shadow.py` |
 
-三个账户各有独立监控页（`/`、`/bench`、`/shadow`），资产曲线、按天战报、事件流全程留痕。
+Each account has its own monitoring dashboard (`/`, `/bench`, `/shadow`) with equity curves, daily battle reports and a full event stream.
 
-## 怎么跑起来
+## Running it
 
 ```bash
-cd 最新版_全自动AUTO_v8.5.5_三账户策略
+cd latest_AUTO-v8.5.5_three-account-system
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env        # 填入你自己的钱包/API 凭据 (本仓库不含任何密钥)
-bash restart.sh             # 入口 autobot.py, 面板 http://localhost:5052
+cp .env.example .env        # fill in your own wallet / API credentials (this repo contains no secrets)
+bash restart.sh             # entry point: autobot.py, dashboard at http://localhost:5052
 ```
 
-注意：`.env` 里 Polymarket 2026 新架构存款钱包必须 `POLY_SIGNATURE_TYPE=3`；`py_clob_client_v2` 已 vendor 在目录里（1.0.2，勿降级）。封存时智谱选品/重评 key 处于停用状态（上游搜索 API 变更导致成本失控），恢复方法见目录内 `CLAUDE.md`。
+Notes: Polymarket's 2026 deposit-wallet accounts require `POLY_SIGNATURE_TYPE=3` in `.env`; `py_clob_client_v2` (1.0.2) is vendored in the directory — do not downgrade. At seal time the Zhipu discovery/re-eval keys were deliberately disabled (an upstream search-API change made costs blow up); see the in-directory `CLAUDE.md` for how to re-enable.
 
-## 想回顾以前的版本和历史迭代？
+## Want the earlier versions and the full iteration history?
 
-全部在 [`历史迭代档案/`](历史迭代档案/)：**从这份 [项目总结报告 (PDF)](历史迭代档案/00_封存总报告/Polymarket项目总结报告_2026-09-20.pdf) 看起**（完整时间线、三账户最终战绩、事故簿、经验教训），然后按编号顺着走——`01` 史前浏览器自动化原型（2026-04）→ `02` v3 半自动初版 → `03` 半自动主项目 v4~v7（更早的 v4/v5 逐代归档嵌在其 `past/` 里）→ `05` 早期文档与研究 PDF → `06` 天气市场支线。
+Everything is under [`history/`](history/) — **start with the [Project Summary Report (bilingual HTML, EN default)](history/00_final-reports/Project-Summary-Report_2026-09-20_bilingual.html) or the [English PDF](history/00_final-reports/Project-Summary-Report_2026-09-20_EN.pdf)** (full timeline, final three-account results, incident log, lessons learned), then walk the numbered folders: `01` browser-automation prototype (2026-04) → `02` v3 semi-auto initial → `03` semi-auto main project v4–v7 (earlier generations archived inside its `past/`) → `05` early docs & research PDFs → `06` weather-market side project. A bilingual index sits at [`history/README.md`](history/README.md).
 
-## 🔒 脱敏与免责
+## 🔒 Sanitization & disclaimer
 
-本仓库为封存快照：所有 `.env`/密钥/浏览器登录态/AI 会话记录/运行日志已移除，仅留 `.env.example` 模板；全部真实密钥值经逐值反查确认零残留。项目已封存、不再维护；预测市场交易有实质亏损风险，本仓库不构成任何投资建议。
+This repository is a sealed snapshot: every `.env` / private key / browser session / AI-chat log / runtime log was removed before upload (only `.env.example` templates remain), and every real secret value was verified byte-level absent from the upload set. The project is archived and unmaintained. Trading prediction markets involves substantial risk of loss; nothing here is financial advice.
 
 *Archived 2026-09-20 · RobinVico*
