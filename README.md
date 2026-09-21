@@ -1,50 +1,53 @@
-# Polymarket 交易机器人项目档案 (2026-04 → 2026-09)
+# Polymarket 全自动交易系统 (AUTO v8.5.5)
 
-> Complete archive of a 5.5-month Polymarket trading-bot project: from a browser-automation prototype, through a human-in-the-loop semi-auto system, to a fully autonomous GLM-driven pipeline running a 3-account live-money strategy experiment. **All credentials removed** — see sanitization notes below.
+> Fully-autonomous Polymarket trading system: scheduled scanning → LLM market discovery → rule-based routing → auto order execution → position monitoring → auto re-evaluation → auto exit. Three live accounts ran three exit-strategy variants on the same AI recommendations. Credentials removed; see `最新版_全自动AUTO_v8.5.5_三账户策略/`.
 
-一个跑了五个半月的 Polymarket 预测市场交易机器人项目的**完整封存档案**：从浏览器自动化原型（v1）→ 半自动（人拍板、bot 执行，v3~v7）→ 全自动（扫描→GLM 选品→自动下单→自动重评→自动出场，v8）→ 三个真钱账户的策略对照实验，2026-09-20 封存。
+这是本项目的**最新版本**：一套零人工的 Polymarket 预测市场全自动交易系统，代码在 [`最新版_全自动AUTO_v8.5.5_三账户策略/`](最新版_全自动AUTO_v8.5.5_三账户策略/)。
 
-## 📖 先看什么
+## 它是怎么运行的
 
-- **[项目总结报告 (PDF)](00_封存总报告/Polymarket项目总结报告_2026-09-20.pdf)** — 全项目总览：干了什么、逐条迭代时间线、最终战绩、事故簿、重启改进清单（另有 .docx/.html 可编辑版）
-- **[三账户终版报告 (PDF)](00_封存总报告/三账户终版报告-2026-09-20.pdf)** — 三种出场策略的真钱对照实验终版数据
+**一条全自动流水线**（一个进程，端口 5052）：
 
-## 🏁 最终战绩（资产真相口径 = 现总资产 − 净投入）
+```
+定时扫描 ──→ GLM 选品 ──→ 写死规则分流 ──→ 自动下单 ──→ 盯盘 ──→ 自动重评 ──→ 自动出场
+09:00/21:00   联网深度调研    0.40<价<0.85     Kelly仓位     每30秒     大跌触发+每日     止盈/止损
+27个白名单tag  输出JSON推荐    真买,否则测试仓   +信心乘数                15:00全仓巡检     /重评说卖
+```
 
-| 账户 / 策略 | 净投入 | 封存日资产 | 盈亏 |
-|---|---:|---:|---:|
-| 主账户 · 全自动完整策略（Kelly 仓位 + 三档止损 + 止盈 + GLM 重评） | $99.66 | $90.61 | **−9.1%** |
-| Bench · 基准对照（GLM 推荐照单全收，仅亏 30% 即卖） | $90.47 | $41.81 | **−53.8%** |
-| Shadow · 低价拿到底（只买 ≤0.40，−60% 止损，持有到结算） | $50.00 | $22.16 | **−55.7%** |
-| **合计** | **$240.13** | **$154.58** | **−35.6%** |
+1. **扫描**：每天 09:00 / 21:00 扫 27 个白名单 tag（`modules/tags.py`），机械过滤流动性/价格/日期，产出候选报告；
+2. **选品**：候选 ≥5 个的 tag 送智谱 GLM（多轮自主联网搜索 agent），回结构化 JSON 推荐（方向 + 胜率估计 q + 信心）；
+3. **分流**：写死规则——新鲜盘口价在 0.40~0.85 之间才真钱买入，其余进免费测试仓；关键词黑名单强制只进测试仓；
+4. **下单**：1/4 Kelly 公式定仓位（本金参考冻结 $50，信心乘数 ×0.75~1.25，单仓硬顶 $5），临下单复核盘口漂移 >3pp 就放弃；
+5. **盯盘**（纯价格逻辑，零 API 成本）：三档止损——收敛型峰值回撤 20%、混合型 35%、事件型 −50% 硬止损，连拍确认直接平仓；止盈翻倍全卖 / 0.92 卖半等梯队；
+6. **重评**：事件型仓位从持有期最好点回撤 ≥5pp 触发一次 GLM 重评 + 每天 15:00 全仓巡检；重评判 exit 立刻卖出，配方向纠错反问闸防 AI 填反数字。
 
-**核心结论**：① 同一批 AI 推荐，出场规则不同结局天差地别——**赚（少亏）的钱来自止盈止损纪律，不是选品**；② GLM 裸预测整体判对率 56.8%（83/146），但低价区（<40¢）只有 11/45——**低价长尾被 LLM 系统性高估**；③ $2~5 的小仓位下交易磨损占比过大，策略再好也难覆盖。
+**同一批 AI 推荐喂三个真钱账户**，对照三种出场哲学：
 
-## 📁 目录结构（按时间顺序）
+| 账户 | 出场规则 | 入口 |
+|---|---|---|
+| 主账户 | 上面的完整策略 | `modules/auto_trader.py` + `modules/monitor.py` |
+| Bench 基准 | 照单全收，仅「亏 30% 即卖」，其余持有到结算 | `modules/auto_bench.py` |
+| Shadow 低价 | 只买 ≤0.40 的推荐，−60% 止损，不止盈持有到结算 | `modules/auto_shadow.py` |
 
-| 目录 | 阶段 | 时间 | 内容 |
-|---|---|---|---|
-| `00_封存总报告/` | — | 2026-09-20 | 总结报告（PDF/docx/html）+ 三账户终版报告 |
-| `01_史前_v1_polymarket-bot_…/` | v1 | 04-08 ~ 04-16 | 最早尝试：浏览器自动化驱动 Gemini Deep Research 选品（含 04-15 备份、debug 截图） |
-| `02_v3_半自动初版_…/` | v3 | 04-27（冻结） | 人下单 + Claude 分析 + bot 分层止盈止损的原型 |
-| `03_半自动主项目_v4至v7_…/` | v4→v7.5.4 | 05-09 ~ 07-24 | 主战场：决策引擎/重评体系/Dashboard 在此成型；**更早迭代嵌在 `past/`（v4、v5、v5.6~5.9 逐代归档）**；含交易数据库与两份 PPT |
-| `04_全自动AUTO_v8_…/` | v8.0→v8.5.5 | 07-06 ~ 09-20 | 全自动流水线 + 三账户实验；含封存日数据库快照、6 份历史 PDF 报告、4 份分享 PPT、完整技术报告与 CLAUDE.md 规则史 |
-| `05_散落文件_…/` | 佐证 | 04 ~ 09 | v1/v2/v3 各代技术文档、5 月份 AI 研究分析 PDF、项目记忆库（memory 笔记） |
-| `06_支线_天气bot_…/` | 支线 | 07-12 起 | Polymarket 每日最高温市场套利（日落后温度只降不升，买 0.90~0.995 档位），独立钱包独立策略 |
+三个账户各有独立监控页（`/`、`/bench`、`/shadow`），资产曲线、按天战报、事件流全程留痕。
 
-## 🔒 脱敏说明（本仓库如何做的防护）
+## 怎么跑起来
 
-与本地母档案相比，上传前**移除**了：
+```bash
+cd 最新版_全自动AUTO_v8.5.5_三账户策略
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env        # 填入你自己的钱包/API 凭据 (本仓库不含任何密钥)
+bash restart.sh             # 入口 autobot.py, 面板 http://localhost:5052
+```
 
-1. **全部凭据**：所有 `.env`、`.env.bak_*`、`_local_secrets/`（钱包私钥、交易所凭据、智谱/Anthropic API key、面板密码）——仅保留 `.env.example` 模板；
-2. **全部旧 git 历史**（`.git/`）：历史提交中可能存在过的敏感内容一并规避，本仓库为全新单提交快照；
-3. **浏览器 profile**（含登录态 cookie）与 **AI 会话原始记录**（可能含贴入过的凭据），仅保留整理过的 memory 笔记；
-4. 运行日志（单文件数百 MB 且可能含敏感回显）、`.venv`、`__pycache__`、数据库运行时副本（`-wal/-shm/.bak_*`）。
+注意：`.env` 里 Polymarket 2026 新架构存款钱包必须 `POLY_SIGNATURE_TYPE=3`；`py_clob_client_v2` 已 vendor 在目录里（1.0.2，勿降级）。封存时智谱选品/重评 key 处于停用状态（上游搜索 API 变更导致成本失控），恢复方法见目录内 `CLAUDE.md`。
 
-上传集经过**逐值反查**：从全部 8 个凭据文件提取的每一个真实密钥值，在全部 675 个上传文件（含数据库、PDF、PPT 二进制）中确认零残留。数据库中出现的 `0x…` 地址为链上公开地址与市场 condition id，非私钥。
+## 想回顾以前的版本和历史迭代？
 
-## ⚠️ Disclaimer
+全部在 [`历史迭代档案/`](历史迭代档案/)：**从这份 [项目总结报告 (PDF)](历史迭代档案/00_封存总报告/Polymarket项目总结报告_2026-09-20.pdf) 看起**（完整时间线、三账户最终战绩、事故簿、经验教训），然后按编号顺着走——`01` 史前浏览器自动化原型（2026-04）→ `02` v3 半自动初版 → `03` 半自动主项目 v4~v7（更早的 v4/v5 逐代归档嵌在其 `past/` 里）→ `05` 早期文档与研究 PDF → `06` 天气市场支线。
 
-Research-grade software, archived and unmaintained. Trading prediction markets involves substantial risk of loss. Nothing here is financial advice. 本项目已封存、不再维护；预测市场交易有实质亏损风险，本仓库不构成任何投资建议。
+## 🔒 脱敏与免责
+
+本仓库为封存快照：所有 `.env`/密钥/浏览器登录态/AI 会话记录/运行日志已移除，仅留 `.env.example` 模板；全部真实密钥值经逐值反查确认零残留。项目已封存、不再维护；预测市场交易有实质亏损风险，本仓库不构成任何投资建议。
 
 *Archived 2026-09-20 · RobinVico*
